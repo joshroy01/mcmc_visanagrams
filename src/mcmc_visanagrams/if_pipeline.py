@@ -23,8 +23,8 @@ from diffusers import DiffusionPipeline
 from torch.nn.functional import interpolate
 import numpy as np
 
-from if_safety_checker import IFSafetyChecker
-from if_watermarker import IFWatermarker
+from mcmc_visanagrams.if_safety_checker import IFSafetyChecker
+from mcmc_visanagrams.if_watermarker import IFWatermarker
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

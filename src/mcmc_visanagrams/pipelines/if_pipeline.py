@@ -20,11 +20,12 @@ from diffusers.utils import (
 )
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers import DiffusionPipeline
-from torch.nn.functional import interpolate
 import numpy as np
 
 from .if_safety_checker import IFSafetyChecker
 from .if_watermarker import IFWatermarker
+from ..utils.latents import extract_latents
+from ..utils.output import make_canvas
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -83,60 +84,6 @@ EXAMPLE_DOC_STRING = """
         >>> image[0].save("./if_stage_II.png")
         ```
 """
-
-
-# Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
-def extract_latents(latent_canvas, sizes):
-    # Extract different latent chunks from a canvas
-    latents = []
-
-    for size in sizes:
-        sf, x_start, y_start = size
-        width = sf * 64
-        latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
-
-        if latent.shape[-1] == 64:
-            latent = latent
-        else:
-            latent = interpolate(latent, (64, 64), mode='nearest')
-
-        latents.append(latent)
-
-    latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
-    return latents
-
-
-def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
-    # Make a canvas from different latents
-    canvas_count = torch.zeros(canvas_size, canvas_size).to(latents.device)
-    canvas_latent = torch.zeros(1, in_channels, canvas_size, canvas_size,
-                                dtype=latents.dtype).to(latents.device)
-
-    for size, latent in zip(sizes, latents):
-        latent = latent[None]
-        sf, x_start, y_start = size
-        size = min(canvas_size - x_start, base_size) * sf
-        latent_expand = interpolate(latent, (size, size), mode='nearest')
-
-        weight = 1 / (sf**2)
-        coords = torch.linspace(-1, 1, size).to(latents.device)
-        XX, YY = torch.meshgrid(coords, coords)
-        dist_from_edge = torch.sqrt(torch.min((1 - torch.abs(XX))**2, (1 - torch.abs(YY))**2))
-        dist_from_edge = torch.minimum(
-            torch.tensor(6 / 32), dist_from_edge
-        )  # only fall off along the outer edge, to avoid sharp lines at edge of each contributing image
-        dist_from_edge = dist_from_edge / torch.max(dist_from_edge)
-        weight = weight * dist_from_edge + 1e-6
-
-        canvas_latent[:, :, y_start:y_start + size, x_start:x_start +
-                      size] = weight * latent_expand + canvas_latent[:, :, y_start:y_start + size,
-                                                                     x_start:x_start + size]
-        canvas_count[y_start:y_start + size, x_start:x_start +
-                     size] = canvas_count[y_start:y_start + size, x_start:x_start + size] + weight
-
-    canvas_latent = canvas_latent / (canvas_count[None, None] + 1e-10)
-    canvas_latent = torch.nan_to_num(canvas_latent)
-    return canvas_latent
 
 
 class IFPipeline(DiffusionPipeline, LoraLoaderMixin):

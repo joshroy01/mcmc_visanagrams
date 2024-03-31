@@ -16,6 +16,7 @@ from diffusers.schedulers import DDPMScheduler
 from diffusers.utils import (
     BACKENDS_MAPPING,
     is_accelerate_available,
+    is_accelerate_version,
     is_bs4_available,
     is_ftfy_available,
     logging,
@@ -23,9 +24,11 @@ from diffusers.utils import (
 )
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers import DiffusionPipeline
-from .if_pipeline_output import IFPipelineOutput
+# from .if_pipeline_output import IFPipelineOutput
 from .if_safety_checker import IFSafetyChecker
 from .if_watermarker import IFWatermarker
+from ..utils.latents import extract_latents
+from ..utils.output import make_canvas
 
 if is_bs4_available():
     from bs4 import BeautifulSoup
@@ -134,6 +137,81 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             watermarker=watermarker,
         )
         self.register_to_config(requires_safety_checker=requires_safety_checker)
+
+    def enable_sequential_cpu_offload(self, gpu_id=0):
+        r"""
+        Offloads all models to CPU using accelerate, significantly reducing memory usage. When called, the pipeline's
+        models have their state dicts saved to CPU and then are moved to a `torch.device('meta') and loaded to GPU only
+        when their specific submodule has its `forward` method called.
+
+        NOTE(dylan.colli): I'm unsure if this method is necessary. However, the image tapestry
+        notebook implementation of the IFPipeline redefines this method so I'm including it in the
+        super-resolution stage as well.
+        """
+        if is_accelerate_available():
+            from accelerate import cpu_offload
+        else:
+            raise ImportError("Please install accelerate via `pip install accelerate`")
+
+        device = torch.device(f"cuda:{gpu_id}")
+
+        models = [
+            self.text_encoder,
+            self.unet,
+        ]
+        for cpu_offloaded_model in models:
+            if cpu_offloaded_model is not None:
+                cpu_offload(cpu_offloaded_model, device)
+
+        if self.safety_checker is not None:
+            cpu_offload(self.safety_checker, execution_device=device, offload_buffers=True)
+
+    def enable_model_cpu_offload(self, gpu_id=0):
+        r"""
+        Offloads all models to CPU using accelerate, reducing memory usage with a low impact on performance. Compared
+        to `enable_sequential_cpu_offload`, this method moves one whole model at a time to the GPU when its `forward`
+        method is called, and the model remains in GPU until the next model runs. Memory savings are lower than with
+        `enable_sequential_cpu_offload`, but performance is much better due to the iterative
+        execution of the `unet`.
+
+        NOTE(dylan.colli): I'm unsure if this method is necessary. However, the image tapestry
+        notebook implementation of the IFPipeline redefines this method so I'm including it in the
+        super-resolution stage as well.
+        """
+        if is_accelerate_available() and is_accelerate_version(">=", "0.17.0.dev0"):
+            from accelerate import cpu_offload_with_hook
+        else:
+            raise ImportError("`enable_model_cpu_offload` requires `accelerate v0.17.0` or higher.")
+
+        device = torch.device(f"cuda:{gpu_id}")
+
+        if self.device.type != "cpu":
+            self.to("cpu", silence_dtype_warnings=True)
+            torch.cuda.empty_cache(
+            )  # otherwise we don't see the memory savings (but they probably exist)
+
+        hook = None
+
+        if self.text_encoder is not None:
+            _, hook = cpu_offload_with_hook(self.text_encoder, device, prev_module_hook=hook)
+
+            # Accelerate will move the next model to the device _before_ calling the offload hook of the
+            # previous model. This will cause both models to be present on the device at the same time.
+            # IF uses T5 for its text encoder which is really large. We can manually call the offload
+            # hook for the text encoder to ensure it's moved to the cpu before the unet is moved to
+            # the GPU.
+            self.text_encoder_offload_hook = hook
+
+        _, hook = cpu_offload_with_hook(self.unet, device, prev_module_hook=hook)
+
+        # if the safety checker isn't called, `unet_offload_hook` will have to be called to manually offload the unet
+        self.unet_offload_hook = hook
+
+        if self.safety_checker is not None:
+            _, hook = cpu_offload_with_hook(self.safety_checker, device, prev_module_hook=hook)
+
+        # We'll offload the last model manually.
+        self.final_offload_hook = hook
 
     # Copied from diffusers.pipelines.deepfloyd_if.pipeline_if.IFPipeline.remove_all_hooks
     def remove_all_hooks(self):
@@ -289,6 +367,26 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         caption = re.sub(r"^\.\S+$", "", caption)
 
         return caption.strip()
+
+    @property
+    # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline._execution_device
+    def _execution_device(self):
+        r"""
+        Returns the device on which the pipeline's models will be executed. After calling
+        `pipeline.enable_sequential_cpu_offload()` the execution device can only be inferred from Accelerate's module
+        hooks.
+
+        NOTE(dylan.colli): I'm unsure if this method is necessary. However, the image tapestry
+        notebook implementation of the IFPipeline redefines this method so I'm including it in the
+        super-resolution stage as well.
+        """
+        if not hasattr(self.unet, "_hf_hook"):
+            return self.device
+        for module in self.unet.modules():
+            if (hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "execution_device")
+                    and module._hf_hook.execution_device is not None):
+                return torch.device(module._hf_hook.execution_device)
+        return self.device
 
     @torch.no_grad()
     # Copied from diffusers.pipelines.deepfloyd_if.pipeline_if.IFPipeline.encode_prompt
@@ -605,6 +703,8 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
+        context,
+        sampler,
         prompt: Union[str, List[str]] = None,
         height: int = None,
         width: int = None,
@@ -701,6 +801,30 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             of `bool`s denoting whether the corresponding generated image likely represents "not-safe-for-work" (nsfw)
             or watermarked content, according to the `safety_checker`.
         """
+        # NOTE: You'll notice this ugly formatting throughout this function. I (Dylan) have
+        # separated out chunks of code that I've directly copied from the IFPipeline. Specifically,
+        # I compared the original IFPipeline (part of the diffusers library) to the IFPipeline
+        # included as part of the MCMC notebook and I copied the portions of code that were added
+        # for the MCMC sampling.
+        # ------------------------------------------------------------------------------------------
+        prompts = []
+        weights = []
+        sizes = []
+
+        for k, v in context.items():
+            size, start_x, start_y = k
+            prompt = v['string']
+            guidance = v['magnitude']
+
+            prompts.append(prompt)
+            weights.append(guidance)
+            sizes.append([size, start_x, start_y])
+
+        prompt = prompts
+        device = self._execution_device
+        weights = torch.Tensor(weights).to(device)[:, None, None, None]
+        # ------------------------------------------------------------------------------------------
+
         # 1. Check inputs. Raise error if not correct
 
         if prompt is not None and isinstance(prompt, str):
@@ -758,19 +882,94 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             timesteps = self.scheduler.timesteps
 
         # 5. Prepare intermediate images
+        # ------------------------------------------------------------------------------------------
+        # TODO(dylan.colli): This isn't the same way as the IFPipeline specifies the number of
+        # channels for MCMC but it was in the super resolution pipeline originally. I wonder if this
+        # is necessary to use for some reason I don't understand.
         num_channels = self.unet.config.in_channels // 2
-        intermediate_images = self.prepare_intermediate_images(
-            batch_size * num_images_per_prompt,
-            num_channels,
-            height,
-            width,
-            prompt_embeds.dtype,
-            device,
-            generator,
-        )
+        # intermediate_images = self.prepare_intermediate_images(
+        #     batch_size * num_images_per_prompt,
+        #     num_channels,
+        #     height,
+        #     width,
+        #     prompt_embeds.dtype,
+        #     device,
+        #     generator,
+        # )
+        latents_canvas = self.prepare_intermediate_images(1, self.unet.config.in_channels, height,
+                                                          width, prompt_embeds.dtype, device,
+                                                          generator)
+        # ------------------------------------------------------------------------------------------
+
+        # ------------------------------------------------------------------------------------------
+        # Dylan copied this from the IFPipeline
+        _, _, canvas_size, _ = latents_canvas.size()
+        intermediate_images = extract_latents(latents_canvas, sizes)
+        # ------------------------------------------------------------------------------------------
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
+
+        # ------------------------------------------------------------------------------------------
+        # Dylan copied this from the IFPipeline
+        alphas = 1 - self.scheduler.betas
+        alphas_cumprod = np.cumprod(alphas)
+        scalar = np.sqrt(1 / (1 - alphas_cumprod))
+
+        # ------------------------------------------------------------------------------------------
+
+        # ------------------------------------------------------------------------------------------
+        # Begin copied section from IFPipeline by Dylan.
+        # Compute the gradient function for MCMC sampling
+        def gradient_fn(x, t, text_embeddings):
+            # Compute normal classifier-free guidance update
+            x = extract_latents(x, sizes)
+            model_input = (torch.cat([x] * 2) if do_classifier_free_guidance else x)
+            model_input = self.scheduler.scale_model_input(model_input, t)
+            # predict the noise residual
+            noise_pred = self.unet(
+                model_input.type(prompt_embeds.dtype),
+                t,
+                encoder_hidden_states=prompt_embeds,
+                cross_attention_kwargs=cross_attention_kwargs,
+                return_dict=False,
+            )[0]
+
+            s = noise_pred.size()
+            noise_pred = noise_pred.reshape(2, -1, *s[1:])
+            noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
+            noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1], dim=1)
+            noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1], dim=1)
+
+            noise_pred_uncond_canvas = make_canvas(noise_pred_uncond,
+                                                   canvas_size,
+                                                   sizes,
+                                                   in_channels=self.unet.config.in_channels)
+            noise_pred_text_canvas = make_canvas(noise_pred_text,
+                                                 canvas_size,
+                                                 sizes,
+                                                 in_channels=self.unet.config.in_channels)
+            noise_pred = noise_pred_uncond_canvas + 7.5 * (noise_pred_text_canvas -
+                                                           noise_pred_uncond_canvas)
+            # Need to scale the gradients by coefficient to properly account for normalization in DSM loss + data contraction
+            scale = scalar[t]
+            noise_pred_normalized = noise_pred / (noise_pred**2).mean().sqrt()
+            return -1 * scale * noise_pred_normalized
+
+        def sync_fn(x):
+            x_canvas = make_canvas(x, canvas_size, sizes, in_channels=self.unet.config.in_channels)
+            x = extract_latents(x_canvas, sizes)
+            return x
+
+        def noise_fn():
+            noise_canvas = torch.randn_like(latents_canvas)
+            noise = extract_latents(noise_canvas, sizes)
+            return noise
+
+        sampler._gradient_function = gradient_fn
+        sampler._sync_function = sync_fn
+        sampler._noise_function = noise_fn
+        # ------------------------------------------------------------------------------------------
 
         # 7. Prepare upscaled image and noise level
         image = self.preprocess_image(image, num_images_per_prompt, device)
@@ -813,12 +1012,26 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
                 # perform guidance
                 if do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
+                    #-------------------------------------------------------------------------------
+                    # noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    s = noise_pred.size()
+                    noise_pred = noise_pred.reshape(2, -1, *s[1:])
+                    # noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
+                    noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
+                    #-------------------------------------------------------------------------------
+
+                    # TODO(dylan.colli): Does this floor division assume that the number of channels
+                    # passed in was floor-divided by 2 as well? See the TODO at the beginning of
+                    # this function.
                     noise_pred_text, predicted_variance = noise_pred_text.split(
                         model_input.shape[1] // 2, dim=1)
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text -
-                                                                       noise_pred_uncond)
+
+                    #-------------------------------------------------------------------------------
+                    # noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text -
+                    #                                                    noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + weights * (noise_pred_text - noise_pred_uncond)
+                    #-------------------------------------------------------------------------------
+
                     noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
 
                 if self.scheduler.config.variance_type not in ["learned", "learned_range"]:
@@ -831,6 +1044,18 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           **extra_step_kwargs,
                                                           return_dict=False)[0]
 
+                # Dylan copied this conditional from IFPipeline.
+                if t > 50:
+                    # The score functions in the last 50 steps don't really change the image
+                    intermediate_images_canvas = make_canvas(
+                        intermediate_images,
+                        canvas_size,
+                        sizes,
+                        in_channels=self.unet.config.in_channels)
+                    intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
+                                                              prompt_embeds)
+                    intermediate_images = extract_latents(intermediate_images, sizes)
+
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
                                                (i + 1) % self.scheduler.order == 0):
@@ -838,44 +1063,53 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                     if callback is not None and i % callback_steps == 0:
                         callback(i, t, intermediate_images)
 
+                #-----------------------------------------------------------------------------------
+                # Dylan copied this from IFPipeline.
+                # cast dtype
+                intermediate_images = intermediate_images.type(prompt_embeds.dtype)
+                #-----------------------------------------------------------------------------------
+
         image = intermediate_images
 
-        if output_type == "pil":
-            # 9. Post-processing
-            image = (image / 2 + 0.5).clamp(0, 1)
-            image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        # This big chunk is removed in the MCMC implementation of IFPipeline.
+        # if output_type == "pil":
+        #     # 9. Post-processing
+        #     image = (image / 2 + 0.5).clamp(0, 1)
+        #     image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
-            # 10. Run safety checker
-            image, nsfw_detected, watermark_detected = self.run_safety_checker(
-                image, device, prompt_embeds.dtype)
+        #     # 10. Run safety checker
+        #     image, nsfw_detected, watermark_detected = self.run_safety_checker(
+        #         image, device, prompt_embeds.dtype)
 
-            # 11. Convert to PIL
-            image = self.numpy_to_pil(image)
+        #     # 11. Convert to PIL
+        #     image = self.numpy_to_pil(image)
 
-            # 12. Apply watermark
-            if self.watermarker is not None:
-                self.watermarker.apply_watermark(image, self.unet.config.sample_size)
-        elif output_type == "pt":
-            nsfw_detected = None
-            watermark_detected = None
+        #     # 12. Apply watermark
+        #     if self.watermarker is not None:
+        #         self.watermarker.apply_watermark(image, self.unet.config.sample_size)
+        # elif output_type == "pt":
+        #     nsfw_detected = None
+        #     watermark_detected = None
 
-            if hasattr(self, "unet_offload_hook") and self.unet_offload_hook is not None:
-                self.unet_offload_hook.offload()
-        else:
-            # 9. Post-processing
-            image = (image / 2 + 0.5).clamp(0, 1)
-            image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        #     if hasattr(self, "unet_offload_hook") and self.unet_offload_hook is not None:
+        #         self.unet_offload_hook.offload()
+        # else:
+        #     # 9. Post-processing
+        #     image = (image / 2 + 0.5).clamp(0, 1)
+        #     image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
-            # 10. Run safety checker
-            image, nsfw_detected, watermark_detected = self.run_safety_checker(
-                image, device, prompt_embeds.dtype)
+        #     # 10. Run safety checker
+        #     image, nsfw_detected, watermark_detected = self.run_safety_checker(
+        #         image, device, prompt_embeds.dtype)
 
-        # Offload all models
-        self.maybe_free_model_hooks()
+        # # Offload all models
+        # self.maybe_free_model_hooks()
 
-        if not return_dict:
-            return (image, nsfw_detected, watermark_detected)
+        # if not return_dict:
+        #     return (image, nsfw_detected, watermark_detected)
 
-        return IFPipelineOutput(images=image,
-                                nsfw_detected=nsfw_detected,
-                                watermark_detected=watermark_detected)
+        # return IFPipelineOutput(images=image,
+        #                         nsfw_detected=nsfw_detected,
+        #                         watermark_detected=watermark_detected)
+        image = make_canvas(image, canvas_size, sizes, in_channels=self.unet.config.in_channels)
+        return image

@@ -21,3 +21,24 @@ def extract_latents(latent_canvas, sizes):
 
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
+
+def extract_latents_stage_2(latent_canvas, sizes, target_size=128):
+    """Extracts latents for stage 2
+
+    NOTE: This should eventually be combined with the extract_latents function
+    """
+    latents = []
+    for size in sizes:
+        sf, x_start, y_start = size
+        width = sf * target_size
+        latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
+
+        if latent.shape[-1] == target_size:
+            latent = latent
+        else:
+            latent = interpolate(latent, (target_size, target_size), mode='nearest')
+
+        latents.append(latent)
+
+    latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
+    return latents

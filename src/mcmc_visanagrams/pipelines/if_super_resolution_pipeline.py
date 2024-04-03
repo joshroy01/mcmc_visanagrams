@@ -27,7 +27,7 @@ from diffusers import DiffusionPipeline
 # from .if_pipeline_output import IFPipelineOutput
 from .if_safety_checker import IFSafetyChecker
 from .if_watermarker import IFWatermarker
-from ..utils.latents import extract_latents
+from ..utils.latents import extract_latents, extract_latents_stage_2
 from ..utils.output import make_canvas
 
 if is_bs4_available():
@@ -869,6 +869,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             clean_caption=clean_caption,
         )
 
+
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
 
@@ -904,7 +905,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # ------------------------------------------------------------------------------------------
         # Dylan copied this from the IFPipeline
         _, _, canvas_size, _ = latents_canvas.size()
-        intermediate_images = extract_latents(latents_canvas, sizes)
+        intermediate_images = extract_latents_stage_2(latents_canvas, sizes)
         # ------------------------------------------------------------------------------------------
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline

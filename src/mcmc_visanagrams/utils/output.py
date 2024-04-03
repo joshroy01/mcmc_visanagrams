@@ -1,3 +1,7 @@
+from typing import Dict, Tuple, Any
+import json
+from pathlib import Path
+
 import torch
 from torch.nn.functional import interpolate
 
@@ -33,3 +37,27 @@ def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
     canvas_latent = canvas_latent / (canvas_count[None, None] + 1e-10)
     canvas_latent = torch.nan_to_num(canvas_latent)
     return canvas_latent
+
+def save_context(context: Dict[Tuple, Dict[str, Any]], path: Path):
+    # Have to convert to JSON-serializable dictionary. The only thing that is an issue is that the
+    # top-level key is a tuple which isn't JSON-serializable. So we convert it to a string.
+    context_dict = {}
+    for key, value in context.items():
+        context_dict[str(key)] = value
+
+    with path.open('w') as f:
+        json.dump(context_dict, f, indent=4)
+
+def load_context(path: Path) -> Dict[Tuple, Dict[str, Any]]:
+    with path.open('r') as f:
+        context_dict = json.load(f)
+
+    # Convert the string key back to a tuple
+    context = {}
+    for key, value in context_dict.items():
+        # Do a modicum of input validation since eval is scary.
+        if not key.startswith('(') or not key.endswith(')'):
+            raise ValueError(f'Invalid key: {key}, expected tuple')
+        context[eval(key)] = value
+
+    return context

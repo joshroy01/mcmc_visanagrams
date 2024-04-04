@@ -871,7 +871,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         # Compute the gradient function for MCMC sampling
         def gradient_fn(x, t, text_embeddings):
             # Compute normal classifier-free guidance update
-            x = extract_latents(x, sizes)
+            x = extract_latents(x, sizes, views)
             model_input = (torch.cat([x] * 2) if do_classifier_free_guidance else x)
             model_input = self.scheduler.scale_model_input(model_input, t)
             # predict the noise residual

@@ -8,7 +8,7 @@ from .view_rotate import Rotate180View, Rotate90CCWView, Rotate90CWView
 from .view_negate import NegateView
 from .view_skew import SkewView
 from .view_patch_permute import PatchPermuteView
-from .view_jigsaw import JigsawView
+# from .view_jigsaw import JigsawView
 from .view_inner_circle import InnerCircleView, InnerCircleViewFailure
 from .view_square_hinge import SquareHingeView
 from .view_blur import BlurViewFailure
@@ -24,7 +24,6 @@ VIEW_MAP = {
     'skew': SkewView,
     'patch_permute': PatchPermuteView,
     'pixel_permute': PatchPermuteView,
-    'jigsaw': JigsawView,
     'inner_circle': InnerCircleView,
     'square_hinge': SquareHingeView,
     'inner_circle_failure': InnerCircleViewFailure,

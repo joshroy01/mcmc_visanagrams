@@ -780,15 +780,16 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         view_list = []
 
         for k, v in context.items():
-            size, start_x, start_y = k
-            prompt = v['string']
-            guidance = v['magnitude']
-            view = v['view']
+            for d in v:
+                size, start_x, start_y = k
+                prompt = d['string']
+                guidance = d['magnitude']
+                view = d['view']
 
-            view_list.append(view)
-            prompts.append(prompt)
-            weights.append(guidance)
-            sizes.append([size, start_x, start_y])
+                view_list.append(view)
+                prompts.append(prompt)
+                weights.append(guidance)
+                sizes.append([size, start_x, start_y])
         
         views = get_views(view_list)
         prompt = prompts

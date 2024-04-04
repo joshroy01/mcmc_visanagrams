@@ -3,7 +3,7 @@ import inspect
 import re
 import urllib.parse as ul
 from typing import Any, Callable, Dict, List, Optional, Union
-
+from views import get_views
 import torch
 from transformers import CLIPImageProcessor, T5EncoderModel, T5Tokenizer
 from diffusers.loaders import LoraLoaderMixin
@@ -86,14 +86,17 @@ EXAMPLE_DOC_STRING = """
 
 
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
-def extract_latents(latent_canvas, sizes):
+def extract_latents(latent_canvas, sizes, views):
     # Extract different latent chunks from a canvas
     latents = []
 
-    for size in sizes:
+    for i, size in enumerate(sizes):
         sf, x_start, y_start = size
         width = sf * 64
         latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
+
+        # TODO check applying views before or after interpolate 
+        views[i].view(latent)
 
         if latent.shape[-1] == 64:
             latent = latent
@@ -101,7 +104,8 @@ def extract_latents(latent_canvas, sizes):
             latent = interpolate(latent, (64, 64), mode='nearest')
 
         latents.append(latent)
-
+    print("latent canvas", latent_canvas.shape)
+    print("latent shape", latents[0].shape)
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
 
@@ -771,15 +775,21 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         weights = []
         sizes = []
 
+       
+        view_list = []
+
         for k, v in context.items():
             size, start_x, start_y = k
             prompt = v['string']
             guidance = v['magnitude']
+            view = v['view']
 
+            view_list.append(view)
             prompts.append(prompt)
             weights.append(guidance)
             sizes.append([size, start_x, start_y])
-
+        
+        views = get_views(view_list)
         prompt = prompts
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
@@ -842,7 +852,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         )
 
         _, _, canvas_size, _ = latents_canvas.size()
-        intermediate_images = extract_latents(latents_canvas, sizes)
+        intermediate_images = extract_latents(latents_canvas, sizes, views)
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)

@@ -1,6 +1,7 @@
 import html
 import inspect
 import re
+from einops import einsum, rearrange
 import urllib.parse as ul
 from typing import Any, Callable, Dict, List, Optional, Union
 from views import get_views

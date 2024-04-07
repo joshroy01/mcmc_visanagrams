@@ -676,6 +676,15 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
 
         return caption.strip()
 
+    def apply_reverse_view(intermediate_images, views):
+        rev_imgs = []
+        for num in range(intermediate_images.shape[0]):
+            inter_img = intermediate_images[num,...]
+            rev_img = views[num].inverse_view(inter_img)
+            rev_imgs.append(rev_img)
+        
+        return torch.stack(rev_imgs)
+
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
@@ -958,6 +967,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
 
                 if t > 50:
                     # The score functions in the last 50 steps don't really change the image
+                    #call reverse transform for each canvas
                     intermediate_images_canvas = make_canvas(
                         intermediate_images,
                         canvas_size,

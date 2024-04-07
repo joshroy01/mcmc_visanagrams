@@ -105,8 +105,7 @@ def extract_latents(latent_canvas, sizes, views):
             latent = interpolate(latent, (64, 64), mode='nearest')
 
         latents.append(latent)
-    print("latent canvas", latent_canvas.shape)
-    print("latent shape", latents[0].shape)
+ 
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
 
@@ -975,7 +974,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                         in_channels=self.unet.config.in_channels)
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
-                    intermediate_images = extract_latents(intermediate_images, sizes)
+                    intermediate_images = extract_latents(intermediate_images, sizes, views)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and

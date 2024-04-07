@@ -22,11 +22,16 @@ def extract_latents(latent_canvas, sizes):
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
 
-def extract_latents_stage_2(latent_canvas, sizes, target_size=128):
+
+def extract_latents_stage_2(latent_canvas: torch.Tensor, sizes, target_size: int = 128):
     """Extracts latents for stage 2
 
     NOTE: This should eventually be combined with the extract_latents function
     """
+    if latent_canvas.shape[-1] != 256:
+        raise ValueError("Latent canvas should have a width of 256")
+    if latent_canvas.shape[-2] != 256:
+        raise ValueError("Latent canvas should have a height of 256")
     latents = []
     for size in sizes:
         sf, x_start, y_start = size

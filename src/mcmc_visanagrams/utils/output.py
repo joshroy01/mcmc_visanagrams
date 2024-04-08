@@ -38,6 +38,13 @@ def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
     canvas_latent = torch.nan_to_num(canvas_latent)
     return canvas_latent
 
+
+def make_canvas_stage_2(latents, canvas_size, sizes, in_channels=3):
+    """Wrapper for make_canvas that uses target_size=128"""
+    # TODO: Add some error checking here to debug stage 2 issues?
+    return make_canvas(latents, canvas_size, sizes, in_channels=in_channels, base_size=128)
+
+
 def save_context(context: Dict[Tuple, Dict[str, Any]], path: Path):
     # Have to convert to JSON-serializable dictionary. The only thing that is an issue is that the
     # top-level key is a tuple which isn't JSON-serializable. So we convert it to a string.
@@ -47,6 +54,7 @@ def save_context(context: Dict[Tuple, Dict[str, Any]], path: Path):
 
     with path.open('w') as f:
         json.dump(context_dict, f, indent=4)
+
 
 def load_context(path: Path) -> Dict[Tuple, Dict[str, Any]]:
     with path.open('r') as f:

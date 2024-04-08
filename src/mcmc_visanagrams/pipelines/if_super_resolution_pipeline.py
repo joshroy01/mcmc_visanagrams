@@ -27,8 +27,8 @@ from diffusers import DiffusionPipeline
 # from .if_pipeline_output import IFPipelineOutput
 from .if_safety_checker import IFSafetyChecker
 from .if_watermarker import IFWatermarker
-from ..utils.latents import extract_latents, extract_latents_stage_2
-from ..utils.output import make_canvas
+from ..utils.latents import extract_latents_stage_2
+from ..utils.output import make_canvas_stage_2
 
 if is_bs4_available():
     from bs4 import BeautifulSoup
@@ -823,10 +823,12 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         prompt = prompts
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
+        print("Sizes:", sizes)
         # ------------------------------------------------------------------------------------------
 
         # 1. Check inputs. Raise error if not correct
-
+        # This is further up in the function than in IFPipeline since batch_size is checked in the
+        # check_inputs() method.
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -834,19 +836,20 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        self.check_inputs(
-            prompt,
-            image,
-            batch_size,
-            noise_level,
-            callback_steps,
-            negative_prompt,
-            prompt_embeds,
-            negative_prompt_embeds,
-        )
+        # self.check_inputs(
+        #     prompt,
+        #     image,
+        #     batch_size,
+        #     noise_level,
+        #     callback_steps,
+        #     negative_prompt,
+        #     prompt_embeds,
+        #     negative_prompt_embeds,
+        # )
 
         # 2. Define call parameters
-
+        # Woah. Didn't realize that you could rely on truthiness of int/None to select the one
+        # that's specified like this. Good tip!
         height = height or self.unet.config.sample_size
         width = width or self.unet.config.sample_size
 
@@ -869,7 +872,6 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             clean_caption=clean_caption,
         )
 
-
         if do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
 
@@ -885,9 +887,12 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # 5. Prepare intermediate images
         # ------------------------------------------------------------------------------------------
         # TODO(dylan.colli): This isn't the same way as the IFPipeline specifies the number of
-        # channels for MCMC but it was in the super resolution pipeline originally. I wonder if this
-        # is necessary to use for some reason I don't understand.
+        # channels for MCMC but it was in the super resolution pipeline originally. I believe this
+        # is done as in stage 2, the intermediate_images (initially pure noise) is concatenated
+        # channel-wise with the noised output of stage 1. I bet this is done as a sort of
+        # "guidance".
         num_channels = self.unet.config.in_channels // 2
+        # num_channels = self.unet.config.in_channels
         # intermediate_images = self.prepare_intermediate_images(
         #     batch_size * num_images_per_prompt,
         #     num_channels,
@@ -897,14 +902,33 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         #     device,
         #     generator,
         # )
-        latents_canvas = self.prepare_intermediate_images(1, self.unet.config.in_channels, height,
-                                                          width, prompt_embeds.dtype, device,
-                                                          generator)
+        # With one prompt, the size of the latents_canvas is [1, num_channels, 256, 256]
+        latents_canvas = self.prepare_intermediate_images(
+            1,
+            num_channels,
+            height,
+            width,
+            prompt_embeds.dtype,
+            device,
+            generator,
+        )
+
+        # TODO: Should I upscale here?
+        # 7. Prepare upscaled image and noise level
+        # image is [1, 3, 128, 128]
+        image = self.preprocess_image(image, num_images_per_prompt, device)
+
+        # If truly upscaling, size is [1, 3, 256, 256]
+        # upscaled = F.interpolate(image, (height, width), mode="bilinear", align_corners=True)
+        # If not upscaling, size is [1, 3, 128, 128]
+        upscaled = image
         # ------------------------------------------------------------------------------------------
 
         # ------------------------------------------------------------------------------------------
         # Dylan copied this from the IFPipeline
+        # canvas_size is 256
         _, _, canvas_size, _ = latents_canvas.size()
+        # intermediate_images is [num_contexts, num_channels, 128, 128] when only using 1 context.
         intermediate_images = extract_latents_stage_2(latents_canvas, sizes)
         # ------------------------------------------------------------------------------------------
 
@@ -919,14 +943,50 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
         # ------------------------------------------------------------------------------------------
 
+        # # 7. Prepare upscaled image and noise level
+        # image = self.preprocess_image(image, num_images_per_prompt, device)
+        # upscaled = F.interpolate(image, (height, width), mode="bilinear", align_corners=True)
+
+        # Repeat the upscaled image to match the number of contexts provided (the batch dimension)
+        upscaled = upscaled.repeat(len(sizes), 1, 1, 1)
+
+        # TODO(dylan.colli): Either need to upscale the latents or extract them after upscaling the
+        # larger image. OR we simply don't concatenate the latents and the upscaled image, opting to
+        # use the non-upscaled image and compose in the make_canvas function.
+
+        noise_level = torch.tensor([noise_level] * upscaled.shape[0], device=upscaled.device)
+        noise = randn_tensor(upscaled.shape,
+                             generator=generator,
+                             device=upscaled.device,
+                             dtype=upscaled.dtype)
+        upscaled: torch.Tensor = self.image_noising_scheduler.add_noise(upscaled,
+                                                                        noise,
+                                                                        timesteps=noise_level)
+        # TODO: The above step noises the input image since stage 1 produces a clean, but low
+        # resolution input image. I'm thinking I might need to extract the latents from this noised,
+        # upscaled image and not concatenate intermediate_images and upscaled.
+
+        if do_classifier_free_guidance:
+            noise_level = torch.cat([noise_level] * 2)
+
         # ------------------------------------------------------------------------------------------
         # Begin copied section from IFPipeline by Dylan.
         # Compute the gradient function for MCMC sampling
         def gradient_fn(x, t, text_embeddings):
             # Compute normal classifier-free guidance update
-            x = extract_latents(x, sizes)
+            x = extract_latents_stage_2(x, sizes)
+
+            # Dylan added this line for stage 2.
+            x = torch.cat([x, upscaled], dim=1)
+
             model_input = (torch.cat([x] * 2) if do_classifier_free_guidance else x)
             model_input = self.scheduler.scale_model_input(model_input, t)
+
+            # NOTE: Getting an error here that says:
+            #   "class_labels should be provided when num_class_embeds > 0"
+            # What is indicating the number of class embeds?
+            # Seems like the only thing that's different with this UNET call versus the call made in
+            # the denoising loop is that the denoising loop passes the class_labels=noise_level.
             # predict the noise residual
             noise_pred = self.unet(
                 model_input.type(prompt_embeds.dtype),
@@ -934,22 +994,28 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 encoder_hidden_states=prompt_embeds,
                 cross_attention_kwargs=cross_attention_kwargs,
                 return_dict=False,
+                # Dylan added this line for stage 2
+                class_labels=noise_level,
             )[0]
 
             s = noise_pred.size()
             noise_pred = noise_pred.reshape(2, -1, *s[1:])
             noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
-            noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1], dim=1)
-            noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1], dim=1)
+            noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
+            noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1] // 2,
+                                                                        dim=1)
 
-            noise_pred_uncond_canvas = make_canvas(noise_pred_uncond,
-                                                   canvas_size,
-                                                   sizes,
-                                                   in_channels=self.unet.config.in_channels)
-            noise_pred_text_canvas = make_canvas(noise_pred_text,
-                                                 canvas_size,
-                                                 sizes,
-                                                 in_channels=self.unet.config.in_channels)
+            # print("WARNING: Do I need to halve the number of channels here?")
+            noise_pred_uncond_canvas = make_canvas_stage_2(
+                noise_pred_uncond,
+                canvas_size,
+                sizes,
+                in_channels=self.unet.config.in_channels // 2)
+            noise_pred_text_canvas = make_canvas_stage_2(noise_pred_text,
+                                                         canvas_size,
+                                                         sizes,
+                                                         in_channels=self.unet.config.in_channels //
+                                                         2)
             noise_pred = noise_pred_uncond_canvas + 7.5 * (noise_pred_text_canvas -
                                                            noise_pred_uncond_canvas)
             # Need to scale the gradients by coefficient to properly account for normalization in DSM loss + data contraction
@@ -958,33 +1024,23 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             return -1 * scale * noise_pred_normalized
 
         def sync_fn(x):
-            x_canvas = make_canvas(x, canvas_size, sizes, in_channels=self.unet.config.in_channels)
-            x = extract_latents(x_canvas, sizes)
+            # TODO: Should we use num_channels instead of self.unet.config.in_channels?
+            x_canvas = make_canvas_stage_2(x,
+                                           canvas_size,
+                                           sizes,
+                                           in_channels=self.unet.config.in_channels)
+            x = extract_latents_stage_2(x_canvas, sizes)
             return x
 
         def noise_fn():
             noise_canvas = torch.randn_like(latents_canvas)
-            noise = extract_latents(noise_canvas, sizes)
+            noise = extract_latents_stage_2(noise_canvas, sizes)
             return noise
 
         sampler._gradient_function = gradient_fn
         sampler._sync_function = sync_fn
         sampler._noise_function = noise_fn
         # ------------------------------------------------------------------------------------------
-
-        # 7. Prepare upscaled image and noise level
-        image = self.preprocess_image(image, num_images_per_prompt, device)
-        upscaled = F.interpolate(image, (height, width), mode="bilinear", align_corners=True)
-
-        noise_level = torch.tensor([noise_level] * upscaled.shape[0], device=upscaled.device)
-        noise = randn_tensor(upscaled.shape,
-                             generator=generator,
-                             device=upscaled.device,
-                             dtype=upscaled.dtype)
-        upscaled = self.image_noising_scheduler.add_noise(upscaled, noise, timesteps=noise_level)
-
-        if do_classifier_free_guidance:
-            noise_level = torch.cat([noise_level] * 2)
 
         # HACK: see comment in `enable_model_cpu_offload`
         if hasattr(self,
@@ -995,11 +1051,31 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                print("Intermediate images shape:", intermediate_images.shape)
+                print("Upscaled shape:", upscaled.shape)
+                # This is failing due to intermediate images being [128, 128] and upscaled being
+                # [256, 256]
+                # NOTE: I'm going to try out commenting this out. If this doesn't work, I may need
+                # to upscale the latents (if the UNET is expecting 256x256 input).
                 model_input = torch.cat([intermediate_images, upscaled], dim=1)
+                # model_input = intermediate_images
 
+                # If using classifier-free guidance, need to double the input along the batch
+                # dimension so that the model can predict the noise residual for both the
+                # unconditional and conditional noise.
                 model_input = torch.cat([model_input] *
                                         2) if do_classifier_free_guidance else model_input
                 model_input = self.scheduler.scale_model_input(model_input, t)
+
+                # Going to try to repeat the prompt embeddings as I think they are split into 2 in
+                # the UNET model due to the concatenation of intermediate_images with upscaled.
+                # prompt_embeds = prompt_embeds.repeat(2, 1, 1)
+                # This didn't work.
+
+                print("Model input shape:", model_input.shape)
+                print("Prompt embedding shape:", prompt_embeds.shape)
+                print("Cross attention kwargs:", cross_attention_kwargs)
+                print("Class labels:", noise_level)
 
                 # predict the noise residual
                 noise_pred = self.unet(
@@ -1026,10 +1102,15 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                     # this function.
                     noise_pred_text, predicted_variance = noise_pred_text.split(
                         model_input.shape[1] // 2, dim=1)
+                    # noise_pred_text, predicted_variance = noise_pred_text.split(
+                    #     model_input.shape[1], dim=1)
 
+                    noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
                     #-------------------------------------------------------------------------------
                     # noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text -
                     #                                                    noise_pred_uncond)
+                    # noise_pred_uncond is [2, 6, 128, 128]
+                    # noise_pred_text is [2, 3, 128, 128]
                     noise_pred = noise_pred_uncond + weights * (noise_pred_text - noise_pred_uncond)
                     #-------------------------------------------------------------------------------
 
@@ -1048,14 +1129,14 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # Dylan copied this conditional from IFPipeline.
                 if t > 50:
                     # The score functions in the last 50 steps don't really change the image
-                    intermediate_images_canvas = make_canvas(
+                    intermediate_images_canvas = make_canvas_stage_2(
                         intermediate_images,
                         canvas_size,
                         sizes,
-                        in_channels=self.unet.config.in_channels)
+                        in_channels=self.unet.config.in_channels // 2)
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
-                    intermediate_images = extract_latents(intermediate_images, sizes)
+                    intermediate_images = extract_latents_stage_2(intermediate_images, sizes)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
@@ -1112,5 +1193,8 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # return IFPipelineOutput(images=image,
         #                         nsfw_detected=nsfw_detected,
         #                         watermark_detected=watermark_detected)
-        image = make_canvas(image, canvas_size, sizes, in_channels=self.unet.config.in_channels)
+        image = make_canvas_stage_2(image,
+                                    canvas_size,
+                                    sizes,
+                                    in_channels=self.unet.config.in_channels // 2)
         return image

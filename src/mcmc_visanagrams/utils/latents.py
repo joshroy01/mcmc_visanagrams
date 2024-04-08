@@ -3,7 +3,11 @@ from torch.nn.functional import interpolate
 
 
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
-def extract_latents(latent_canvas, sizes):
+def extract_latents(latent_canvas, sizes) -> torch.Tensor:
+    """Extracts latents from the composed canvas
+
+    Returns a tensor that is [num_contexts, num_channels, 64, 64]
+    """
     # Extract different latent chunks from a canvas
     latents = []
 
@@ -23,8 +27,12 @@ def extract_latents(latent_canvas, sizes):
     return latents
 
 
-def extract_latents_stage_2(latent_canvas: torch.Tensor, sizes, target_size: int = 128):
-    """Extracts latents for stage 2
+def extract_latents_stage_2(latent_canvas: torch.Tensor,
+                            sizes,
+                            target_size: int = 128) -> torch.Tensor:
+    """Extracts latents from the composed canvas for stage 2
+
+    Returns a tensor that is [num_contexts, num_channels, 128, 128]
 
     NOTE: This should eventually be combined with the extract_latents function
     """

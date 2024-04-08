@@ -919,9 +919,9 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         image = self.preprocess_image(image, num_images_per_prompt, device)
 
         # If truly upscaling, size is [1, 3, 256, 256]
-        # upscaled = F.interpolate(image, (height, width), mode="bilinear", align_corners=True)
+        upscaled = F.interpolate(image, (height, width), mode="bilinear", align_corners=True)
         # If not upscaling, size is [1, 3, 128, 128]
-        upscaled = image
+        # upscaled = image
         # ------------------------------------------------------------------------------------------
 
         # ------------------------------------------------------------------------------------------
@@ -948,7 +948,8 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # upscaled = F.interpolate(image, (height, width), mode="bilinear", align_corners=True)
 
         # Repeat the upscaled image to match the number of contexts provided (the batch dimension)
-        upscaled = upscaled.repeat(len(sizes), 1, 1, 1)
+        # upscaled = upscaled.repeat(len(sizes), 1, 1, 1)
+        upscaled = extract_latents_stage_2(upscaled, sizes)
 
         # TODO(dylan.colli): Either need to upscale the latents or extract them after upscaling the
         # larger image. OR we simply don't concatenate the latents and the upscaled image, opting to

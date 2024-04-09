@@ -98,8 +98,8 @@ def extract_latents(latent_canvas, sizes, views):
 
         # TODO check applying views before or after interpolate 
         #views[i].view(latent)
-        for view_fn in views:
-            latent = view_fn.view(latent)
+        
+        latent = views[i].view(latent)
 
         if latent.shape[-1] == 64:
             latent = latent
@@ -110,7 +110,6 @@ def extract_latents(latent_canvas, sizes, views):
  
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
-
 
 def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
     # Make a canvas from different latents

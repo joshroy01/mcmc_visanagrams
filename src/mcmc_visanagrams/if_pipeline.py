@@ -97,7 +97,9 @@ def extract_latents(latent_canvas, sizes, views):
         latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
 
         # TODO check applying views before or after interpolate 
-        views[i].view(latent)
+        #views[i].view(latent)
+        for view_fn in views:
+            latent = view_fn.view(latent)
 
         if latent.shape[-1] == 64:
             latent = latent

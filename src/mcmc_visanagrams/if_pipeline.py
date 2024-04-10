@@ -98,8 +98,6 @@ def extract_latents(latent_canvas, sizes, views):
 
         # TODO check applying views before or after interpolate 
         #views[i].view(latent)
-        
-        latent = views[i].view(latent)
 
         if latent.shape[-1] == 64:
             latent = latent
@@ -976,6 +974,11 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
                     intermediate_images = extract_latents(intermediate_images, sizes, views)
+
+                    ##TODO: remove later
+                    for j in range(len(intermediate_images)):
+                        for v_ in views:
+                            intermediate_images[j] = v_.view(intermediate_images[j])
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and

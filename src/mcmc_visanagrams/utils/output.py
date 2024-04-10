@@ -16,7 +16,10 @@ def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
         latent = latent[None]
         sf, x_start, y_start = size
         size = min(canvas_size - x_start, base_size) * sf
-        latent_expand = interpolate(latent, (size, size), mode='nearest')
+
+        # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to use
+        # 'nearest-exact' instead.
+        latent_expand = interpolate(latent, (size, size), mode='nearest-exact')
 
         weight = 1 / (sf**2)
         coords = torch.linspace(-1, 1, size).to(latents.device)
@@ -45,7 +48,26 @@ def make_canvas_stage_2(latents, canvas_size, sizes, in_channels=3):
     return make_canvas(latents, canvas_size, sizes, in_channels=in_channels, base_size=128)
 
 
+def save_model_spec(model_spec: Dict[str, str], dir_path: Path):
+    output_path = dir_path / "model_spec.json"
+    with output_path.open('w') as f:
+        json.dump(model_spec, f, indent=4)
+    print("Saved model specification dictionary to:", output_path.as_posix())
+
+
+def load_model_spec(trial_root_dir: Path) -> Dict[str, str]:
+    spec_path = trial_root_dir / "model_spec.json"
+    with spec_path.open('r') as f:
+        spec = json.load(f)
+    print("Loaded model specification dictionary from:", spec_path.as_posix())
+    return spec
+
+
 def save_context(context: Dict[Tuple, Dict[str, Any]], path: Path):
+    # If the path doesn't specify the filename of the context dictionary, then add it.
+    if not path.suffix:
+        path = path / "context.json"
+
     # Have to convert to JSON-serializable dictionary. The only thing that is an issue is that the
     # top-level key is a tuple which isn't JSON-serializable. So we convert it to a string.
     context_dict = {}
@@ -55,8 +77,14 @@ def save_context(context: Dict[Tuple, Dict[str, Any]], path: Path):
     with path.open('w') as f:
         json.dump(context_dict, f, indent=4)
 
+    print("Saved context to:", path.as_posix())
+
 
 def load_context(path: Path) -> Dict[Tuple, Dict[str, Any]]:
+    # If the path doesn't specify the filename of the context dictionary, then add it.
+    if not path.suffix:
+        path = path / "context.json"
+
     with path.open('r') as f:
         context_dict = json.load(f)
 
@@ -67,5 +95,7 @@ def load_context(path: Path) -> Dict[Tuple, Dict[str, Any]]:
         if not key.startswith('(') or not key.endswith(')'):
             raise ValueError(f'Invalid key: {key}, expected tuple')
         context[eval(key)] = value
+
+    print("Loaded context from:", path.as_posix())
 
     return context

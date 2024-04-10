@@ -1,10 +1,9 @@
 import html
 import inspect
 import re
-from einops import einsum, rearrange
+# from einops import einsum, rearrange
 import urllib.parse as ul
-from typing import Any, Callable, Dict, List, Optional, Union
-from views import get_views
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union, Tuple
 import torch
 from transformers import CLIPImageProcessor, T5EncoderModel, T5Tokenizer
 from diffusers.loaders import LoraLoaderMixin
@@ -26,6 +25,10 @@ import numpy as np
 
 from mcmc_visanagrams.if_safety_checker import IFSafetyChecker
 from mcmc_visanagrams.if_watermarker import IFWatermarker
+from mcmc_visanagrams.views import get_views
+
+if TYPE_CHECKING:
+    from mcmc_visanagrams.views.view_base import BaseView
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -87,7 +90,9 @@ EXAMPLE_DOC_STRING = """
 
 
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
-def extract_latents(latent_canvas, sizes, views):
+def extract_latents(latent_canvas: torch.Tensor,
+                    sizes: List[Tuple[int, int, int]],
+                    views: Optional[List['BaseView']] = None) -> torch.Tensor:
     # Extract different latent chunks from a canvas
     latents = []
 
@@ -96,18 +101,21 @@ def extract_latents(latent_canvas, sizes, views):
         width = sf * 64
         latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
 
-        # TODO check applying views before or after interpolate 
-        #views[i].view(latent)
-
-        if latent.shape[-1] == 64:
-            latent = latent
+        if views:
+            latent_viewed = views[i].view(latent)
         else:
-            latent = interpolate(latent, (64, 64), mode='nearest')
+            latent_viewed = latent
 
-        latents.append(latent)
- 
+        if latent_viewed.shape[-1] == 64:
+            latent_viewed = latent_viewed
+        else:
+            latent_viewed = interpolate(latent_viewed, (64, 64), mode='nearest')
+
+        latents.append(latent_viewed)
+
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
+
 
 def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
     # Make a canvas from different latents
@@ -677,10 +685,10 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
     def apply_reverse_view(intermediate_images, views):
         rev_imgs = []
         for num in range(intermediate_images.shape[0]):
-            inter_img = intermediate_images[num,...]
+            inter_img = intermediate_images[num, ...]
             rev_img = views[num].inverse_view(inter_img)
             rev_imgs.append(rev_img)
-        
+
         return torch.stack(rev_imgs)
 
     @torch.no_grad()
@@ -783,7 +791,6 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         weights = []
         sizes = []
 
-       
         view_list = []
 
         for k, v in context.items():
@@ -797,7 +804,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                 prompts.append(prompt)
                 weights.append(guidance)
                 sizes.append([size, start_x, start_y])
-        
+
         views = get_views(view_list)
         prompt = prompts
         device = self._execution_device

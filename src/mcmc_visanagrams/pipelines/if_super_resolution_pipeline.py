@@ -818,7 +818,10 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
             prompts.append(prompt)
             weights.append(guidance)
-            sizes.append([size, start_x, start_y])
+
+            print("Assuming sizes specified in stage_1 sizes so multiplying by 2!!!")
+
+            sizes.append([size, start_x * 2, start_y * 2])
 
         prompt = prompts
         device = self._execution_device

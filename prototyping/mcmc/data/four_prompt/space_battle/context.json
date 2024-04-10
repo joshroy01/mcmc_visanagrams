@@ -1,0 +1,18 @@
+{
+    "(2, 0, 0)": {
+        "string": "Detailed movie still of an epic space battle. The starship Enterprise fights a giant mech robot over the planet mars.",
+        "magnitude": 20.0
+    },
+    "(1, 64, 0)": {
+        "string": "Detailed closeup of a movie still of an epic space battle. Sun with lens flare",
+        "magnitude": 20.0
+    },
+    "(1, 0, 64)": {
+        "string": "Detailed closeup of a movie still. A giant mecha robot is fighting in space, holding a glowing sword",
+        "magnitude": 20.0
+    },
+    "(1, 64, 64)": {
+        "string": "Detailed closeup of a movie still of an epic space battle, showing a portion of the red planet Mars. Debris falling into the atmosphere",
+        "magnitude": 20.0
+    }
+}

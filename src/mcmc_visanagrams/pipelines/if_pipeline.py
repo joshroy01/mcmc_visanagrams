@@ -857,9 +857,18 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                # If using classifier-free guidance, need to double the input along the batch
+                # dimension so that the model can predict the noise residual for both the
+                # unconditional and conditional noise.
                 model_input = (torch.cat([intermediate_images] *
                                          2) if do_classifier_free_guidance else intermediate_images)
                 model_input = self.scheduler.scale_model_input(model_input, t)
+
+                # model_input shape is [num_contexts * 2, 3, 64, 64] (assuming classifer-free
+                # guidance).
+                print("Model input shape:", model_input.shape)
+                print("Prompt embedding shape:", prompt_embeds.shape)
+                print("Cross attention kwargs:", cross_attention_kwargs)
 
                 # predict the noise residual
                 noise_pred = self.unet(

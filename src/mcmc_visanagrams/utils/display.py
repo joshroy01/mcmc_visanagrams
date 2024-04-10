@@ -43,3 +43,20 @@ def visualize_context(canvas_size, base_size, context, color_lookup):
         draw_box(img, (xstart, ystart), scale * base_size, color, canvas_size - 1)
 
     return img
+
+
+def image_from_latents(image, clip_dynamic_range=False):
+    if not isinstance(image, np.ndarray):
+        image = image[0].cpu().numpy().transpose(1, 2, 0)
+        image = ((image + 1) / 2 * 255)
+
+    if clip_dynamic_range:
+        image[image < 0.0] = 0.0
+        image[image > 255] = 255
+
+    print(image.min())
+    print(image.max())
+
+    image = image.astype(np.uint8)
+
+    return image

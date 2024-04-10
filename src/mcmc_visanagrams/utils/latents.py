@@ -19,7 +19,9 @@ def extract_latents(latent_canvas, sizes) -> torch.Tensor:
         if latent.shape[-1] == 64:
             latent = latent
         else:
-            latent = interpolate(latent, (64, 64), mode='nearest')
+            # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to
+            # use 'nearest-exact' instead.
+            latent = interpolate(latent, (64, 64), mode='nearest-exact')
 
         latents.append(latent)
 
@@ -49,9 +51,44 @@ def extract_latents_stage_2(latent_canvas: torch.Tensor,
         if latent.shape[-1] == target_size:
             latent = latent
         else:
-            latent = interpolate(latent, (target_size, target_size), mode='nearest')
+            # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to
+            # use 'nearest-exact' instead.
+            latent = interpolate(latent, (target_size, target_size), mode='nearest-exact')
 
         latents.append(latent)
 
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
+
+
+def test_canvas_and_extraction(latents, context):
+    raise NotImplementedError(
+        "This function was included more as an example of how one would test the canvas and "
+        "extraction functions. It is not meant to be run as is.")
+    latents_upscaled = torch.nn.functional.interpolate(latents,
+                                                       size=(256, 256),
+                                                       mode="bilinear",
+                                                       align_corners=True)
+    sizes = [[k[0], *[v * 2 for v in k[1:]]] for k in context.keys()]
+
+    latent_canvas_test = latents_upscaled
+
+    for i in range(20):
+        lats_test = extract_latents_stage_2(latent_canvas_test, sizes)
+        print("lats_test shape:", lats_test.shape)
+
+        # lats_test_np = lats_test.detach().cpu().numpy()
+
+        # for i in range(lats_test.shape[0]):
+        #     image = image_from_latents(lats_test[i].unsqueeze(0))
+        #     plt.imshow(image)
+        #     plt.show()
+
+        # Making the canvas from the extracted latents
+        latent_canvas_test = make_canvas_stage_2(lats_test, 256, sizes, in_channels=3)
+    canvas = image_from_latents(latent_canvas_test)
+    plt.figure()
+    plt.imshow(canvas)
+
+    err = latents_upscaled - latent_canvas_test
+    print(err.square().mean().sqrt())

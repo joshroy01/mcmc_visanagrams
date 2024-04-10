@@ -953,10 +953,24 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # Repeat the upscaled image to match the number of contexts provided (the batch dimension)
         # upscaled = upscaled.repeat(len(sizes), 1, 1, 1)
         upscaled = extract_latents_stage_2(upscaled, sizes)
+        print("Upscaled shape post-latent-extraction:", upscaled.shape)
 
-        # TODO(dylan.colli): Either need to upscale the latents or extract them after upscaling the
-        # larger image. OR we simply don't concatenate the latents and the upscaled image, opting to
-        # use the non-upscaled image and compose in the make_canvas function.
+        # This seems to suggest that the upscaled (and subsequently downscaled extracted latents) is
+        # still fairly "good" and representative of the image that was passed in.
+        # import matplotlib.pyplot as plt
+        # from mcmc_visanagrams.utils.display import image_from_latents
+        # for i in range(upscaled.shape[0]):
+        #     plt.figure()
+        #     up_np = upscaled[i].to(torch.double).detach().cpu().numpy().transpose(1, 2, 0)
+        #     up_np = ((up_np + 1) / 2 * 255).astype(np.uint8)
+        #     plt.imshow(up_np)
+        #     plt.show()
+        # plt.figure()
+        # up_np = upscaled[0].to(torch.double).detach().cpu().numpy().transpose(1, 2, 0)
+        # up_np = ((up_np + 1) / 2 * 255).astype(np.uint8)
+        # plt.imshow(up_np)
+        # plt.show()
+        # return
 
         noise_level = torch.tensor([noise_level] * upscaled.shape[0], device=upscaled.device)
         noise = randn_tensor(upscaled.shape,
@@ -1002,12 +1016,14 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 class_labels=noise_level,
             )[0]
 
-            s = noise_pred.size()
-            noise_pred = noise_pred.reshape(2, -1, *s[1:])
-            noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
-            noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
-            noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1] // 2,
-                                                                        dim=1)
+            # s = noise_pred.size()
+            # noise_pred = noise_pred.reshape(2, -1, *s[1:])
+            # noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
+            # noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
+            # noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1] // 2,
+            #                                                             dim=1)
+            (noise_pred_text, predicted_variance,
+             noise_pred_uncond) = self._extract_noise_from_prediction(noise_pred)
 
             # print("WARNING: Do I need to halve the number of channels here?")
             noise_pred_uncond_canvas = make_canvas_stage_2(
@@ -1055,6 +1071,11 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
+                # TODO: I feel like it could be beneficial to switch which of the nearest neighbors
+                # is used when downsampling in the extract latents function (but only per iteration
+                # in the denoising loop, otherwise the gradient function would be messed up if we
+                # did it per-function call). I feel like this might be the reason we get some visual
+                # artifacts in the output images.
                 print("Intermediate images shape:", intermediate_images.shape)
                 print("Upscaled shape:", upscaled.shape)
                 # This is failing due to intermediate images being [128, 128] and upscaled being
@@ -1062,7 +1083,6 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # NOTE: I'm going to try out commenting this out. If this doesn't work, I may need
                 # to upscale the latents (if the UNET is expecting 256x256 input).
                 model_input = torch.cat([intermediate_images, upscaled], dim=1)
-                # model_input = intermediate_images
 
                 # If using classifier-free guidance, need to double the input along the batch
                 # dimension so that the model can predict the noise residual for both the
@@ -1082,7 +1102,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 print("Class labels:", noise_level)
 
                 # predict the noise residual
-                noise_pred = self.unet(
+                noise_pred: torch.Tensor = self.unet(
                     model_input,
                     t,
                     encoder_hidden_states=prompt_embeds,
@@ -1093,32 +1113,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
                 # perform guidance
                 if do_classifier_free_guidance:
-                    #-------------------------------------------------------------------------------
-                    # noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    s = noise_pred.size()
-                    noise_pred = noise_pred.reshape(2, -1, *s[1:])
-                    # noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
-                    noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
-                    #-------------------------------------------------------------------------------
-
-                    # TODO(dylan.colli): Does this floor division assume that the number of channels
-                    # passed in was floor-divided by 2 as well? See the TODO at the beginning of
-                    # this function.
-                    noise_pred_text, predicted_variance = noise_pred_text.split(
-                        model_input.shape[1] // 2, dim=1)
-                    # noise_pred_text, predicted_variance = noise_pred_text.split(
-                    #     model_input.shape[1], dim=1)
-
-                    noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1] // 2, dim=1)
-                    #-------------------------------------------------------------------------------
-                    # noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text -
-                    #                                                    noise_pred_uncond)
-                    # noise_pred_uncond is [2, 6, 128, 128]
-                    # noise_pred_text is [2, 3, 128, 128]
-                    noise_pred = noise_pred_uncond + weights * (noise_pred_text - noise_pred_uncond)
-                    #-------------------------------------------------------------------------------
-
-                    noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
+                    noise_pred = self._classifier_free_guidance(noise_pred, weights, model_input)
 
                 if self.scheduler.config.variance_type not in ["learned", "learned_range"]:
                     noise_pred, _ = noise_pred.split(intermediate_images.shape[1], dim=1)
@@ -1131,7 +1126,9 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           return_dict=False)[0]
 
                 # Dylan copied this conditional from IFPipeline.
-                if t > 50:
+                # if t > 50:
+                if True:
+                    # if False:
                     # The score functions in the last 50 steps don't really change the image
                     intermediate_images_canvas = make_canvas_stage_2(
                         intermediate_images,
@@ -1154,6 +1151,8 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # cast dtype
                 intermediate_images = intermediate_images.type(prompt_embeds.dtype)
                 #-----------------------------------------------------------------------------------
+
+                print()
 
         image = intermediate_images
 
@@ -1202,3 +1201,41 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                     sizes,
                                     in_channels=self.unet.config.in_channels // 2)
         return image
+
+    def _extract_noise_from_prediction(self, model_output: torch.Tensor):
+        """Extracts the conditioned and unconditioned noise estimates from model output
+
+        NOTE: Assumes classifier-free guidance was used
+        """
+        # channels = model_input.shape[1] // 2
+        channels = 3
+
+        # This is the MCMC method of extracting this information. I'm a bit worried this isn't
+        # holding for stage 2 like it did for stage 1.
+        s = model_output.size()
+        model_output = model_output.reshape(2, -1, *s[1:])
+        # print("Noise prediction reshaped:", model_output.shape)
+
+        noise_pred_uncond, noise_pred_text = model_output[0], model_output[1]
+        noise_pred_text, predicted_variance = noise_pred_text.split(channels, dim=1)
+        noise_pred_uncond, _ = noise_pred_uncond.split(channels, dim=1)
+
+        # Trying out the method included from huggingface for extracting this information.
+        # noise_pred_uncond, noise_pred_text = model_output.chunk(2)
+        # noise_pred_uncond, _ = noise_pred_uncond.split(channels, dim=1)
+        # noise_pred_text, predicted_variance = noise_pred_text.split(channels, dim=1)
+
+        return (noise_pred_text, predicted_variance, noise_pred_uncond)
+
+    def _classifier_free_guidance(self, noise_pred: torch.Tensor, weights: torch.Tensor,
+                                  model_input: torch.Tensor) -> torch.Tensor:
+        print("Noise prediction output from UNET shape:", noise_pred.shape)
+
+        (noise_pred_text, predicted_variance,
+         noise_pred_uncond) = self._extract_noise_from_prediction(noise_pred)
+
+        noise_pred = noise_pred_uncond + weights * (noise_pred_text - noise_pred_uncond)
+
+        noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
+
+        return noise_pred

@@ -45,6 +45,7 @@ class Config:
         self.sampler = config["sampler"]
         self.seed = config.get("seed", None)
         self.stage_1_args = config["stage_1_args"]
+        self.stage_2_args = config["stage_2_args"]
 
         # Make the trial output path and save the config file in it.
         self.trial_output_path.mkdir(exist_ok=True)
@@ -63,6 +64,23 @@ class Config:
     # def initialize_sampler(self):
     #     if self.sampler["name"] == "AnnealedULASampler":
     #         return AnnealedULASampler(self.sampler["num_steps"], self.sampler["num_samplers_per_steps"])
+
+
+def save_all_views_of_latent(latent_canvas: torch.Tensor, sizes, views, output_path: Path):
+    sub_latents = extract_latents(latent_canvas, sizes=sizes, views=views)
+    saved_img_paths = []
+    for i, sub_lat in enumerate(sub_latents):
+        img = image_from_latents(sub_lat.unsqueeze(0), clip_dynamic_range=True)
+        fig, ax = plt.subplots()
+        ax.imshow(img)
+
+        view_name = type(views[i]).__name__
+        ax.set_title(view_name)
+
+        img_path = output_path / f"sub_latent_{i}.png"
+        fig.savefig(img_path)
+        saved_img_paths.append(img_path)
+    return saved_img_paths
 
 
 def main(config: Config):
@@ -145,62 +163,35 @@ def main(config: Config):
 
     sizes = config.context_list.collapse_sizes()
     views = config.context_list.collapse_views()
-    sub_latents = extract_latents(latent_canvas_stage_1, sizes=sizes, views=views)
-    saved_img_paths = []
-    for i, sub_lat in enumerate(sub_latents):
-        img = image_from_latents(sub_lat.unsqueeze(0), clip_dynamic_range=True)
-        fig, ax = plt.subplots()
-        ax.imshow(img)
-
-        view_name = type(views[i]).__name__
-        ax.set_title(view_name)
-
-        img_path = config.stage_1_output_path / f"sub_latent_{i}.png"
-        fig.savefig(img_path)
-        saved_img_paths.append(img_path)
-
+    saved_img_paths = save_all_views_of_latent(latent_canvas_stage_1, sizes, views,
+                                               config.stage_1_output_path)
     make_report(config, saved_img_paths, stage_num=1)
 
-    # stage_2 = IFSuperResolutionPipeline.from_pretrained(config.model_spec["stage_2"],
-    #                                                     text_encoder=None,
-    #                                                     variant="fp16",
-    #                                                     torch_dtype=torch.float16)
-    # stage_2.enable_xformers_memory_efficient_attention()
-    # stage_2.enable_model_cpu_offload()
+    stage_2 = IFSuperResolutionPipeline.from_pretrained(config.model_spec["stage_2"],
+                                                        text_encoder=None,
+                                                        variant="fp16",
+                                                        torch_dtype=torch.float16)
+    stage_2.enable_xformers_memory_efficient_attention()
+    stage_2.enable_model_cpu_offload()
+    stage_2.text_encoder = stage_1.text_encoder
 
-    # # num_steps_stage_2 = 50
-    # num_steps_stage_2 = steps
-    # stage_2.text_encoder = stage_1.text_encoder
+    with torch.no_grad():
+        latent_canvas_stage_2 = stage_2(
+            image=latent_canvas_stage_1,
+            context=config.context_list,
+            sampler=la_sampler,
+            height=config.stage_2_args["height"],
+            width=config.stage_2_args["width"],
+            #  prompt_embeds=prompt_embeds,
+            #  negative_prompt_embeds=negative_embeds,
+            generator=generator,
+            output_type="pt",
+            num_inference_steps=config.stage_2_args["num_inference_steps"])
 
-    # with torch.no_grad():
-    #     images = stage_2(
-    #         image=latent_canvas_stage_1,
-    #         context=context,
-    #         sampler=la_sampler,
-    #         height=256,
-    #         width=256,
-    #         #  prompt_embeds=prompt_embeds,
-    #         #  negative_prompt_embeds=negative_embeds,
-    #         generator=generator,
-    #         output_type="pt",
-    #         num_inference_steps=num_steps_stage_2)
-
-    # # save upsampled image
-    # if not isinstance(images, np.ndarray):
-    #     images = images[0].cpu().numpy().transpose(1, 2, 0)
-    #     images = ((images + 1) / 2 * 255)
-
-    # if CLIP_DYNAMIC_RANGE:
-    #     images[images < 0.0] = 0.0
-    #     images[images > 255] = 255
-
-    # print(images.min())
-    # print(images.max())
-
-    # images = images.astype(np.uint8)
-    # plt.imshow(images)
-
-    # # np.save("oil_painting_swiss_alps_no_composed_diffusion_2.npy", images)
+    sizes = config.context_list.collapse_sizes(is_stage_2=True)
+    saved_img_paths = save_all_views_of_latent(latent_canvas_stage_2, sizes, views,
+                                               config.stage_2_output_path)
+    make_report(config, saved_img_paths, stage_num=2)
 
 
 if __name__ == "__main__":

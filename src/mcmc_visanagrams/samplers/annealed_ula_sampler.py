@@ -15,7 +15,18 @@ class AnnealedULASampler:
         self._sync_function = sync_function
         self._noise_function = noise_function
 
-    def sample_step(self, x, t, text_embeddings):
+    def sample_step(self, x: torch.Tensor, t, text_embeddings):
+        """Steps the sampler
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Current noisy (composed) image.
+        t : Any
+            Unsure of this. I think it's a scaling parameter
+        text_embeddings : torch.Tensor
+            The text embeddings.
+        """
 
         for i in range(self._num_samples_per_step):
             ss = self._step_sizes[t]

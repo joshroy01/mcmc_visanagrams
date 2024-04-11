@@ -1,0 +1,4 @@
+{
+    "stage_1": "DeepFloyd/IF-I-XL-v1.0",
+    "stage_2": "DeepFloyd/IF-II-L-v1.0"
+}

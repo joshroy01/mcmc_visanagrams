@@ -1,35 +1,47 @@
-from typing import Dict, Tuple, Any
+from typing import TYPE_CHECKING, Dict, Tuple, Any, Optional, List
 import json
 from pathlib import Path
 
 import torch
 from torch.nn.functional import interpolate
 
+if TYPE_CHECKING:
+    from mcmc_visanagrams.views.view_base import BaseView
 
-def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
+
+def make_canvas(latents,
+                canvas_size,
+                sizes,
+                in_channels=3,
+                base_size=64,
+                views: Optional[List['BaseView']] = None,
+                do_edge_interpolation: bool = True):
     # Make a canvas from different latents
     canvas_count = torch.zeros(canvas_size, canvas_size).to(latents.device)
     canvas_latent = torch.zeros(1, in_channels, canvas_size, canvas_size,
                                 dtype=latents.dtype).to(latents.device)
 
-    for size, latent in zip(sizes, latents):
+    for i, (size, latent) in enumerate(zip(sizes, latents)):
         latent = latent[None]
         sf, x_start, y_start = size
         size = min(canvas_size - x_start, base_size) * sf
 
-        # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to use
-        # 'nearest-exact' instead.
-        latent_expand = interpolate(latent, (size, size), mode='nearest-exact')
+        latent_expand = interpolate(latent, (size, size), mode='nearest')
+
+        if views:
+            latent_expand = views[i].inverse_view(latent_expand)
 
         weight = 1 / (sf**2)
-        coords = torch.linspace(-1, 1, size).to(latents.device)
-        XX, YY = torch.meshgrid(coords, coords)
-        dist_from_edge = torch.sqrt(torch.min((1 - torch.abs(XX))**2, (1 - torch.abs(YY))**2))
-        dist_from_edge = torch.minimum(
-            torch.tensor(6 / 32), dist_from_edge
-        )  # only fall off along the outer edge, to avoid sharp lines at edge of each contributing image
-        dist_from_edge = dist_from_edge / torch.max(dist_from_edge)
-        weight = weight * dist_from_edge + 1e-6
+        if do_edge_interpolation:
+            coords = torch.linspace(-1, 1, size).to(latents.device)
+            XX, YY = torch.meshgrid(coords, coords)
+            dist_from_edge = torch.sqrt(torch.min((1 - torch.abs(XX))**2, (1 - torch.abs(YY))**2))
+            dist_from_edge = torch.minimum(
+                torch.tensor(6 / 32), dist_from_edge
+            )  # only fall off along the outer edge, to avoid sharp lines at edge of each contributing image
+            dist_from_edge = dist_from_edge / torch.max(dist_from_edge)
+            weight = weight * dist_from_edge
+        weight = weight + 1e-6
 
         canvas_latent[:, :, y_start:y_start + size, x_start:x_start +
                       size] = weight * latent_expand + canvas_latent[:, :, y_start:y_start + size,

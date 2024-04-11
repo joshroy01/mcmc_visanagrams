@@ -1,29 +1,32 @@
+from typing import List, Tuple, Optional
+
 import torch
 from torch.nn.functional import interpolate
 
 
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
-def extract_latents(latent_canvas, sizes) -> torch.Tensor:
-    """Extracts latents from the composed canvas
-
-    Returns a tensor that is [num_contexts, num_channels, 64, 64]
-    """
+def extract_latents(latent_canvas: torch.Tensor,
+                    sizes: List[Tuple[int, int, int]],
+                    views: Optional[List['BaseView']] = None) -> torch.Tensor:
     # Extract different latent chunks from a canvas
     latents = []
 
-    for size in sizes:
+    for i, size in enumerate(sizes):
         sf, x_start, y_start = size
         width = sf * 64
         latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
 
-        if latent.shape[-1] == 64:
-            latent = latent
+        if views:
+            latent_viewed = views[i].view(latent)
         else:
-            # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to
-            # use 'nearest-exact' instead.
-            latent = interpolate(latent, (64, 64), mode='nearest-exact')
+            latent_viewed = latent
 
-        latents.append(latent)
+        if latent_viewed.shape[-1] == 64:
+            latent_viewed = latent_viewed
+        else:
+            latent_viewed = interpolate(latent_viewed, (64, 64), mode='nearest')
+
+        latents.append(latent_viewed)
 
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents

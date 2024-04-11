@@ -5,7 +5,13 @@ import pprint
 
 
 def make_report(config, saved_img_paths: List[Path], stage_num: int = 1):
-    stage_output_path = config.stage_1_output_path
+    if stage_num == 1:
+        stage_output_path = config.stage_1_output_path
+    elif stage_num == 2:
+        stage_output_path = config.stage_2_output_path
+    else:
+        raise ValueError(f"Invalid stage number: {stage_num}")
+
     report_stage_1_path = stage_output_path / "report.md"
     make_md_report(report_stage_1_path, config, saved_img_paths, stage_num)
     make_pdf_report(report_stage_1_path)

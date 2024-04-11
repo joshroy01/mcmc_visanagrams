@@ -28,6 +28,7 @@ from mcmc_visanagrams.if_watermarker import IFWatermarker
 
 if TYPE_CHECKING:
     from mcmc_visanagrams.views.view_base import BaseView
+    from mcmc_visanagrams.context import ContextList
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -702,7 +703,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
-        context,
+        context: 'ContextList',
         sampler,
         prompt: Union[str, List[str]] = None,
         num_inference_steps: int = 100,
@@ -794,26 +795,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
             of `bool`s denoting whether the corresponding generated image likely represents "not-safe-for-work" (nsfw)
             or watermarked content, according to the `safety_checker`.
         """
-        prompts = []
-        weights = []
-        sizes = []
-
-        view_list = []
-
-        for k, v in context.items():
-            for d in v:
-                size, start_x, start_y = k
-                prompt = d['string']
-                guidance = d['magnitude']
-                view = d['view']
-
-                view_list.append(view)
-                prompts.append(prompt)
-                weights.append(guidance)
-                sizes.append([size, start_x, start_y])
-
-        views = get_views(view_list)
-        prompt = prompts
+        sizes, prompt, weights, views = context.collapse()
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
 

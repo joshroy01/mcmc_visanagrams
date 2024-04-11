@@ -25,7 +25,6 @@ import numpy as np
 
 from mcmc_visanagrams.if_safety_checker import IFSafetyChecker
 from mcmc_visanagrams.if_watermarker import IFWatermarker
-from mcmc_visanagrams.views import get_views
 
 if TYPE_CHECKING:
     from mcmc_visanagrams.views.view_base import BaseView
@@ -117,17 +116,25 @@ def extract_latents(latent_canvas: torch.Tensor,
     return latents
 
 
-def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
+def make_canvas(latents,
+                canvas_size,
+                sizes,
+                in_channels=3,
+                base_size=64,
+                views: Optional[List['BaseView']] = None):
     # Make a canvas from different latents
     canvas_count = torch.zeros(canvas_size, canvas_size).to(latents.device)
     canvas_latent = torch.zeros(1, in_channels, canvas_size, canvas_size,
                                 dtype=latents.dtype).to(latents.device)
 
-    for size, latent in zip(sizes, latents):
+    for i, (size, latent) in enumerate(zip(sizes, latents)):
         latent = latent[None]
         sf, x_start, y_start = size
         size = min(canvas_size - x_start, base_size) * sf
         latent_expand = interpolate(latent, (size, size), mode='nearest')
+
+        if views:
+            latent_expand = views[i].inverse_view(latent_expand)
 
         weight = 1 / (sf**2)
         coords = torch.linspace(-1, 1, size).to(latents.device)
@@ -906,11 +913,13 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
             noise_pred_uncond_canvas = make_canvas(noise_pred_uncond,
                                                    canvas_size,
                                                    sizes,
-                                                   in_channels=self.unet.config.in_channels)
+                                                   in_channels=self.unet.config.in_channels,
+                                                   views=views)
             noise_pred_text_canvas = make_canvas(noise_pred_text,
                                                  canvas_size,
                                                  sizes,
-                                                 in_channels=self.unet.config.in_channels)
+                                                 in_channels=self.unet.config.in_channels,
+                                                 views=views)
             noise_pred = noise_pred_uncond_canvas + 7.5 * (noise_pred_text_canvas -
                                                            noise_pred_uncond_canvas)
             # Need to scale the gradients by coefficient to properly account for normalization in DSM loss + data contraction
@@ -919,13 +928,17 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
             return -1 * scale * noise_pred_normalized
 
         def sync_fn(x):
-            x_canvas = make_canvas(x, canvas_size, sizes, in_channels=self.unet.config.in_channels)
-            x = extract_latents(x_canvas, sizes)
+            x_canvas = make_canvas(x,
+                                   canvas_size,
+                                   sizes,
+                                   in_channels=self.unet.config.in_channels,
+                                   views=views)
+            x = extract_latents(x_canvas, sizes, views)
             return x
 
         def noise_fn():
             noise_canvas = torch.randn_like(latents_canvas)
-            noise = extract_latents(noise_canvas, sizes)
+            noise = extract_latents(noise_canvas, sizes, views)
             return noise
 
         sampler._gradient_function = gradient_fn
@@ -977,15 +990,22 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                         intermediate_images,
                         canvas_size,
                         sizes,
-                        in_channels=self.unet.config.in_channels)
+                        in_channels=self.unet.config.in_channels,
+                        views=views)
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
                     intermediate_images = extract_latents(intermediate_images, sizes, views)
 
-                    ##TODO: remove later
-                    for j in range(len(intermediate_images)):
-                        for v_ in views:
-                            intermediate_images[j] = v_.view(intermediate_images[j])
+                else:
+                    # With the addition of the views, we still need to make the canvas and extract
+                    # the latents since that includes a normalization step.
+                    intermediate_images_canvas = make_canvas(
+                        intermediate_images,
+                        canvas_size,
+                        sizes,
+                        in_channels=self.unet.config.in_channels,
+                        views=views)
+                    intermediate_images = extract_latents(intermediate_images_canvas, sizes, views)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
@@ -998,5 +1018,9 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                 intermediate_images = intermediate_images.type(prompt_embeds.dtype)
 
         image = intermediate_images
-        image = make_canvas(image, canvas_size, sizes, in_channels=self.unet.config.in_channels)
+        image = make_canvas(image,
+                            canvas_size,
+                            sizes,
+                            in_channels=self.unet.config.in_channels,
+                            views=views)
         return image

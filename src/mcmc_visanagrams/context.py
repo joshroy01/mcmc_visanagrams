@@ -1,4 +1,4 @@
-from typing import Tuple, TYPE_CHECKING, Optional
+from typing import Tuple, TYPE_CHECKING, Optional, List
 from collections import UserList
 
 from mcmc_visanagrams.views import VIEW_MAP
@@ -39,8 +39,14 @@ class ContextList(UserList):
         super().append(item)
 
     def collapse(self):
-        sizes = [c.size for c in self]
+        sizes = self.collapse_sizes()
         prompts = [c.prompt for c in self]
         magnitudes = [c.magnitude for c in self]
         views = [c.view for c in self]
         return sizes, prompts, magnitudes, views
+
+    def collapse_sizes(self) -> List[Tuple[int, int, int]]:
+        return [c.size for c in self]
+
+    def collapse_views(self) -> List['BaseView']:
+        return [c.view for c in self]

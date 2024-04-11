@@ -1,0 +1,35 @@
+# Don't specify stage 2 if you don't want to run it.
+model_spec:
+  stage_1: DeepFloyd/IF-I-XL-v1.0
+  stage_2: DeepFloyd/IF-II-L-v1.0
+trial_name: "dog_flower_va_mcmc_sampling"
+context_list:
+  -
+    size: [2, 0, 0]
+    prompt: painting of a dog
+    magnitude: 10.0
+    view: "identity"
+  -
+    size: [2, 0, 0]
+    prompt: painting of a flower
+    magnitude: 10.0
+    view: "rotate_180"
+sampler:
+  name: AnnealedULASampler
+  kwargs:
+    num_steps: 1000
+    num_samples_per_step: 10
+    # num_samples_per_step: 20
+seed: 0  # Can be None to use random seed.
+stage_1_args:
+  # num_inference_steps: 100
+  # num_inference_steps: 75
+  num_inference_steps: 30
+  # num_inference_steps: 10
+  # num_inference_steps: 2
+  height: 128
+  width: 128
+
+
+
+

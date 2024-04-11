@@ -1,10 +1,9 @@
 import html
 import inspect
 import re
-from einops import einsum, rearrange
+# from einops import einsum, rearrange
 import urllib.parse as ul
-from typing import Any, Callable, Dict, List, Optional, Union
-from views import get_views
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union, Tuple
 import torch
 from transformers import CLIPImageProcessor, T5EncoderModel, T5Tokenizer
 from diffusers.loaders import LoraLoaderMixin
@@ -26,6 +25,10 @@ import numpy as np
 
 from mcmc_visanagrams.if_safety_checker import IFSafetyChecker
 from mcmc_visanagrams.if_watermarker import IFWatermarker
+
+if TYPE_CHECKING:
+    from mcmc_visanagrams.views.view_base import BaseView
+    from mcmc_visanagrams.context import ContextList
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -87,7 +90,9 @@ EXAMPLE_DOC_STRING = """
 
 
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
-def extract_latents(latent_canvas, sizes, views):
+def extract_latents(latent_canvas: torch.Tensor,
+                    sizes: List[Tuple[int, int, int]],
+                    views: Optional[List['BaseView']] = None) -> torch.Tensor:
     # Extract different latent chunks from a canvas
     latents = []
 
@@ -96,40 +101,55 @@ def extract_latents(latent_canvas, sizes, views):
         width = sf * 64
         latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
 
-        # TODO check applying views before or after interpolate 
-        #views[i].view(latent)
-
-        if latent.shape[-1] == 64:
-            latent = latent
+        if views:
+            latent_viewed = views[i].view(latent)
         else:
-            latent = interpolate(latent, (64, 64), mode='nearest')
+            latent_viewed = latent
 
-        latents.append(latent)
- 
+        if latent_viewed.shape[-1] == 64:
+            latent_viewed = latent_viewed
+        else:
+            latent_viewed = interpolate(latent_viewed, (64, 64), mode='nearest')
+
+        latents.append(latent_viewed)
+
     latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
 
-def make_canvas(latents, canvas_size, sizes, in_channels=3, base_size=64):
+
+def make_canvas(latents,
+                canvas_size,
+                sizes,
+                in_channels=3,
+                base_size=64,
+                views: Optional[List['BaseView']] = None,
+                do_edge_interpolation: bool = True):
     # Make a canvas from different latents
     canvas_count = torch.zeros(canvas_size, canvas_size).to(latents.device)
     canvas_latent = torch.zeros(1, in_channels, canvas_size, canvas_size,
                                 dtype=latents.dtype).to(latents.device)
 
-    for size, latent in zip(sizes, latents):
+    for i, (size, latent) in enumerate(zip(sizes, latents)):
         latent = latent[None]
         sf, x_start, y_start = size
         size = min(canvas_size - x_start, base_size) * sf
+
         latent_expand = interpolate(latent, (size, size), mode='nearest')
 
+        if views:
+            latent_expand = views[i].inverse_view(latent_expand)
+
         weight = 1 / (sf**2)
-        coords = torch.linspace(-1, 1, size).to(latents.device)
-        XX, YY = torch.meshgrid(coords, coords)
-        dist_from_edge = torch.sqrt(torch.min((1 - torch.abs(XX))**2, (1 - torch.abs(YY))**2))
-        dist_from_edge = torch.minimum(
-            torch.tensor(6 / 32), dist_from_edge
-        )  # only fall off along the outer edge, to avoid sharp lines at edge of each contributing image
-        dist_from_edge = dist_from_edge / torch.max(dist_from_edge)
-        weight = weight * dist_from_edge + 1e-6
+        if do_edge_interpolation:
+            coords = torch.linspace(-1, 1, size).to(latents.device)
+            XX, YY = torch.meshgrid(coords, coords)
+            dist_from_edge = torch.sqrt(torch.min((1 - torch.abs(XX))**2, (1 - torch.abs(YY))**2))
+            dist_from_edge = torch.minimum(
+                torch.tensor(6 / 32), dist_from_edge
+            )  # only fall off along the outer edge, to avoid sharp lines at edge of each contributing image
+            dist_from_edge = dist_from_edge / torch.max(dist_from_edge)
+            weight = weight * dist_from_edge
+        weight = weight + 1e-6
 
         canvas_latent[:, :, y_start:y_start + size, x_start:x_start +
                       size] = weight * latent_expand + canvas_latent[:, :, y_start:y_start + size,
@@ -677,17 +697,17 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
     def apply_reverse_view(intermediate_images, views):
         rev_imgs = []
         for num in range(intermediate_images.shape[0]):
-            inter_img = intermediate_images[num,...]
+            inter_img = intermediate_images[num, ...]
             rev_img = views[num].inverse_view(inter_img)
             rev_imgs.append(rev_img)
-        
+
         return torch.stack(rev_imgs)
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
-        context,
+        context: 'ContextList',
         sampler,
         prompt: Union[str, List[str]] = None,
         num_inference_steps: int = 100,
@@ -779,29 +799,15 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
             of `bool`s denoting whether the corresponding generated image likely represents "not-safe-for-work" (nsfw)
             or watermarked content, according to the `safety_checker`.
         """
-        prompts = []
-        weights = []
-        sizes = []
-
-       
-        view_list = []
-
-        for k, v in context.items():
-            for d in v:
-                size, start_x, start_y = k
-                prompt = d['string']
-                guidance = d['magnitude']
-                view = d['view']
-
-                view_list.append(view)
-                prompts.append(prompt)
-                weights.append(guidance)
-                sizes.append([size, start_x, start_y])
-        
-        views = get_views(view_list)
-        prompt = prompts
+        sizes, prompt, weights, views = context.collapse()
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
+
+        if len(set(sizes)) != len(sizes):
+            # This conditional means that we have two views corresponding to the same sub-image
+            # (indexed by size).
+            warn("Warning! Dylan noticed that edge interpolation in make_canvas when producing "
+                 "visual anagrams can lead to poor results. Might want to turn this off.")
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(prompt, callback_steps, negative_prompt, prompt_embeds,
@@ -899,11 +905,13 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
             noise_pred_uncond_canvas = make_canvas(noise_pred_uncond,
                                                    canvas_size,
                                                    sizes,
-                                                   in_channels=self.unet.config.in_channels)
+                                                   in_channels=self.unet.config.in_channels,
+                                                   views=views)
             noise_pred_text_canvas = make_canvas(noise_pred_text,
                                                  canvas_size,
                                                  sizes,
-                                                 in_channels=self.unet.config.in_channels)
+                                                 in_channels=self.unet.config.in_channels,
+                                                 views=views)
             noise_pred = noise_pred_uncond_canvas + 7.5 * (noise_pred_text_canvas -
                                                            noise_pred_uncond_canvas)
             # Need to scale the gradients by coefficient to properly account for normalization in DSM loss + data contraction
@@ -912,13 +920,17 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
             return -1 * scale * noise_pred_normalized
 
         def sync_fn(x):
-            x_canvas = make_canvas(x, canvas_size, sizes, in_channels=self.unet.config.in_channels)
-            x = extract_latents(x_canvas, sizes)
+            x_canvas = make_canvas(x,
+                                   canvas_size,
+                                   sizes,
+                                   in_channels=self.unet.config.in_channels,
+                                   views=views)
+            x = extract_latents(x_canvas, sizes, views)
             return x
 
         def noise_fn():
             noise_canvas = torch.randn_like(latents_canvas)
-            noise = extract_latents(noise_canvas, sizes)
+            noise = extract_latents(noise_canvas, sizes, views)
             return noise
 
         sampler._gradient_function = gradient_fn
@@ -970,15 +982,22 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                         intermediate_images,
                         canvas_size,
                         sizes,
-                        in_channels=self.unet.config.in_channels)
+                        in_channels=self.unet.config.in_channels,
+                        views=views)
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
                     intermediate_images = extract_latents(intermediate_images, sizes, views)
 
-                    ##TODO: remove later
-                    for j in range(len(intermediate_images)):
-                        for v_ in views:
-                            intermediate_images[j] = v_.view(intermediate_images[j])
+                else:
+                    # With the addition of the views, we still need to make the canvas and extract
+                    # the latents since that includes a normalization step.
+                    intermediate_images_canvas = make_canvas(
+                        intermediate_images,
+                        canvas_size,
+                        sizes,
+                        in_channels=self.unet.config.in_channels,
+                        views=views)
+                    intermediate_images = extract_latents(intermediate_images_canvas, sizes, views)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
@@ -991,5 +1010,9 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                 intermediate_images = intermediate_images.type(prompt_embeds.dtype)
 
         image = intermediate_images
-        image = make_canvas(image, canvas_size, sizes, in_channels=self.unet.config.in_channels)
+        image = make_canvas(image,
+                            canvas_size,
+                            sizes,
+                            in_channels=self.unet.config.in_channels,
+                            views=views)
         return image

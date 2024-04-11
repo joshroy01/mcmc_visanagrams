@@ -38,15 +38,20 @@ class ContextList(UserList):
 
         super().append(item)
 
-    def collapse(self):
-        sizes = self.collapse_sizes()
+    def collapse(self, is_stage_2: bool = False):
+        sizes = self.collapse_sizes(is_stage_2)
         prompts = [c.prompt for c in self]
         magnitudes = [c.magnitude for c in self]
-        views = [c.view for c in self]
+        views = self.collapse_views()
         return sizes, prompts, magnitudes, views
 
-    def collapse_sizes(self) -> List[Tuple[int, int, int]]:
-        return [c.size for c in self]
+    def collapse_sizes(self, is_stage_2: bool = False) -> List[Tuple[int, int, int]]:
+        sizes = [c.size for c in self]
+
+        if is_stage_2:
+            sizes = [(s[0], s[1] * 2, s[2] * 2) for s in sizes]
+
+        return sizes
 
     def collapse_views(self) -> List['BaseView']:
         return [c.view for c in self]

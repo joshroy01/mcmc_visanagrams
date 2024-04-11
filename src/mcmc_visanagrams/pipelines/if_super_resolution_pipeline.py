@@ -2,7 +2,7 @@ import html
 import inspect
 import re
 import urllib.parse as ul
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
 import PIL.Image
@@ -29,6 +29,9 @@ from .if_safety_checker import IFSafetyChecker
 from .if_watermarker import IFWatermarker
 from ..utils.latents import extract_latents_stage_2
 from ..utils.output import make_canvas_stage_2
+
+if TYPE_CHECKING:
+    from mcmc_visanagrams.context import ContextList
 
 if is_bs4_available():
     from bs4 import BeautifulSoup
@@ -703,7 +706,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
         self,
-        context,
+        context: 'ContextList',
         sampler,
         prompt: Union[str, List[str]] = None,
         height: int = None,
@@ -807,23 +810,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # included as part of the MCMC notebook and I copied the portions of code that were added
         # for the MCMC sampling.
         # ------------------------------------------------------------------------------------------
-        prompts = []
-        weights = []
-        sizes = []
-
-        for k, v in context.items():
-            size, start_x, start_y = k
-            prompt = v['string']
-            guidance = v['magnitude']
-
-            prompts.append(prompt)
-            weights.append(guidance)
-
-            print("Assuming sizes specified in stage_1 sizes so multiplying by 2!!!")
-
-            sizes.append([size, start_x * 2, start_y * 2])
-
-        prompt = prompts
+        sizes, prompt, weights, views = context.collapse(is_stage_2=True)
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
         print("Sizes:", sizes)

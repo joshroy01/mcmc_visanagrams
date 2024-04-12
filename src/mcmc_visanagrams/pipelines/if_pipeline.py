@@ -25,7 +25,7 @@ import numpy as np
 
 from .if_safety_checker import IFSafetyChecker
 from .if_watermarker import IFWatermarker
-from ..utils.latents import extract_latents
+from ..utils.latents import extract_latents, apply_views_to_latents
 from ..utils.output import make_canvas
 
 if TYPE_CHECKING:
@@ -898,19 +898,35 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                     return_dict=False,
                 )[0]
 
+                USING_VA_METHOD = True
+
                 # perform guidance
                 if do_classifier_free_guidance:
-                    s = noise_pred.size()
-                    noise_pred = noise_pred.reshape(2, -1, *s[1:])
-                    noise_pred_uncond, noise_pred_text = noise_pred[0], noise_pred[1]
-                    noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1], dim=1)
-                    noise_pred_text, predicted_variance = noise_pred_text.split(
-                        model_input.shape[1], dim=1)
-                    noise_pred = noise_pred_uncond + weights * (noise_pred_text - noise_pred_uncond)
-                    noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
+                    noise_pred = self._classifier_free_guidance(noise_pred, weights, model_input,
+                                                                views, USING_VA_METHOD)
+                    print("Noise pred shape after classifer free guidance:", noise_pred.shape)
 
                 if self.scheduler.config.variance_type not in ["learned", "learned_range"]:
+                    print("Splitting noise pred, removing predicted variance")
                     noise_pred, _ = noise_pred.split(model_input.shape[1], dim=1)
+
+                if USING_VA_METHOD:
+                    noise_pred = self._adjust_noise_pred_va_method(noise_pred, views)
+                    # intermediate_images = apply_views_to_latents(intermediate_images,
+                    #                                              views,
+                    #                                              inverse=True)
+                    intermediate_images = make_canvas(intermediate_images,
+                                                      canvas_size,
+                                                      sizes,
+                                                      views=views,
+                                                      base_size=base_img_size)
+
+                    print("Adjusted shapes")
+                    print("\tnoise_pred:", noise_pred.shape)
+                    print("\tintermediate_images:", intermediate_images.shape)
+
+                print("Noise prediction shape input to scheduler:", noise_pred.shape)
+                print("intermediate_images shape input to scheduler:", intermediate_images.shape)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 intermediate_images = self.scheduler.step(noise_pred,
@@ -918,6 +934,13 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           intermediate_images,
                                                           **extra_step_kwargs,
                                                           return_dict=False)[0]
+
+                if USING_VA_METHOD:
+                    # intermediate_images = apply_views_to_latents(intermediate_images, views)
+                    intermediate_images = extract_latents(intermediate_images,
+                                                          sizes,
+                                                          views,
+                                                          target_size=base_img_size)
 
                 if t > mcmc_iteration_cutoff:
                     print(f"\nDoing MCMC for iteration {t}!!!\n")
@@ -970,3 +993,124 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                             views=views,
                             base_size=base_img_size)
         return image
+
+    def _extract_noise_from_prediction(self,
+                                       model_output: torch.Tensor,
+                                       model_input: torch.Tensor,
+                                       views: List['BaseView'] = None,
+                                       using_va_method: bool = False):
+        """Extracts the conditioned and unconditioned noise estimates from model output
+
+        NOTE: Assumes classifier-free guidance was used
+        """
+        # channels = model_input.shape[1] // 2
+        # channels = 3
+
+        # This is the MCMC method of extracting this information. I'm a bit worried this isn't
+        # holding for stage 2 like it did for stage 1.
+        # s = model_output.size()
+        # model_output = model_output.reshape(2, -1, *s[1:])
+        # # print("Noise prediction reshaped:", model_output.shape)
+
+        # noise_pred_uncond, noise_pred_text = model_output[0], model_output[1]
+        # noise_pred_text, predicted_variance = noise_pred_text.split(channels, dim=1)
+        # noise_pred_uncond, _ = noise_pred_uncond.split(channels, dim=1)
+
+        # Trying out the method included from huggingface for extracting this information.
+        noise_pred_uncond, noise_pred_text = model_output.chunk(2)
+
+        if using_va_method:
+            inverted_preds = []
+            for pred, view in zip(noise_pred_uncond, views):
+                inverted_pred = view.inverse_view(pred)
+                inverted_preds.append(inverted_pred)
+            noise_pred_uncond = torch.stack(inverted_preds)
+
+            # Invert the conditional estimates
+            inverted_preds = []
+            for pred, view in zip(noise_pred_text, views):
+                inverted_pred = view.inverse_view(pred)
+                inverted_preds.append(inverted_pred)
+            noise_pred_text = torch.stack(inverted_preds)
+
+        noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1], dim=1)
+        noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1], dim=1)
+
+        return (noise_pred_text, predicted_variance, noise_pred_uncond)
+
+    def _classifier_free_guidance(self,
+                                  noise_pred: torch.Tensor,
+                                  weights: torch.Tensor,
+                                  model_input: torch.Tensor,
+                                  views,
+                                  using_va_method: bool = False) -> torch.Tensor:
+        print("Noise prediction output from UNET shape:", noise_pred.shape)
+
+        (noise_pred_text, predicted_variance,
+         noise_pred_uncond) = self._extract_noise_from_prediction(noise_pred, model_input, views,
+                                                                  using_va_method)
+
+        # noise_pred_text = apply_views_to_latents(noise_pred_text, views, inverse=True)
+        # predicted_variance = apply_views_to_latents(predicted_variance, views, inverse=True)
+        # noise_pred_uncond = apply_views_to_latents(noise_pred_uncond, views, inverse=True)
+
+        # I think the problem here is that VA combines the noise predictions and does a single step
+        # call to the scheduler. Here, we are stepping (in a batched fashion) such that the noise is
+        # applied to each sub-image, then we're averaging the resulting denoised image. I think this
+        # is going to produce different results entirely.
+
+        # print("Noise pred text shape:", noise_pred_text.shape)
+        # print("Predicted variance shape:", predicted_variance.shape)
+        # print("Noise pred uncond shape:", noise_pred_uncond.shape)
+
+        # noise_pred_text = apply_views_to_latents(noise_pred_text, views, inverse=True)
+        # predicted_variance = apply_views_to_latents(predicted_variance,
+        #                                             views,
+        #                                             inverse=True)
+        # noise_pred_uncond = apply_views_to_latents(noise_pred_uncond,
+        #                                            views,
+        #                                            inverse=True)
+
+        # print("Noise pred text shape:", noise_pred_text.shape)
+        # print("Predicted variance shape:", predicted_variance.shape)
+        # print("Noise pred uncond shape:", noise_pred_uncond.shape)
+
+        noise_pred = noise_pred_uncond + weights * (noise_pred_text - noise_pred_uncond)
+
+        noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
+
+        return noise_pred
+
+    def _adjust_noise_pred_va_method(self, noise_pred: torch.Tensor, views):
+        print("Noise pred shape before adjustment:", noise_pred.shape)
+        # noise_pred, predicted_variance = noise_pred.split(2, dim=1)
+        noise_pred, predicted_variance = noise_pred.chunk(2, dim=1)
+
+        # This assumes number of views equal to number of prompts
+        # num_views = len(views)
+        # noise_pred = noise_pred.view(-1, num_views, 3, 64, 64)
+
+        # noise_pred = apply_views_to_latents(noise_pred, views, inverse=True)
+        # predicted_variance = apply_views_to_latents(predicted_variance, views, inverse=True)
+
+        # noise_pred = torch.cat([noise_pred, predicted_variance], dim=1).unsqueeze(0)
+        # noise_pred = noise_pred.mean(dim=0)
+
+        # Reduce predicted noise and variances
+        num_prompts = len(views)
+        reduction = 'mean'
+        noise_pred = noise_pred.view(-1, num_prompts, 3, 64, 64)
+        predicted_variance = predicted_variance.view(-1, num_prompts, 3, 64, 64)
+        if reduction == 'mean':
+            noise_pred = noise_pred.mean(1)
+            predicted_variance = predicted_variance.mean(1)
+        # elif reduction == 'alternate':
+        #     noise_pred = noise_pred[:,i%num_prompts]
+        #     predicted_variance = predicted_variance[:,i%num_prompts]
+        else:
+            raise ValueError('Reduction must be either `mean` or `alternate`')
+        noise_pred = torch.cat([noise_pred, predicted_variance], dim=1)
+
+        print("Noise pred shape after adjustment:", noise_pred.shape)
+
+        return noise_pred

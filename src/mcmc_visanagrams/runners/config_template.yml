@@ -2,19 +2,19 @@
 model_spec:
   stage_1: DeepFloyd/IF-I-XL-v1.0
   stage_2: DeepFloyd/IF-II-L-v1.0
-trial_name: "dog_only_pure_va_rotated"
+trial_name: "dog_flower_va_no_mcmc_sampling_trial_2"
 context_list:
   -
     size: [1, 0, 0]
     prompt: painting of a dog
     magnitude: 10.0
-    # view: "identity"
+    view: "identity"
+    # view: "rotate_180"
+  -
+    size: [1, 0, 0]
+    prompt: painting of a flower
+    magnitude: 10.0
     view: "rotate_180"
-  # -
-  #   size: [1, 0, 0]
-  #   prompt: painting of a flower
-  #   magnitude: 10.0
-  #   view: "rotate_180"
 sampler:
   name: AnnealedULASampler
   kwargs:

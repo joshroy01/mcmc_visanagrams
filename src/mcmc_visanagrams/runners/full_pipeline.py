@@ -66,8 +66,9 @@ class Config:
     #         return AnnealedULASampler(self.sampler["num_steps"], self.sampler["num_samplers_per_steps"])
 
 
-def save_all_views_of_latent(latent_canvas: torch.Tensor, sizes, views, output_path: Path):
-    sub_latents = extract_latents(latent_canvas, sizes=sizes, views=views)
+def save_all_views_of_latent(latent_canvas: torch.Tensor, sizes, views, output_path: Path,
+                             target_size: int):
+    sub_latents = extract_latents(latent_canvas, sizes=sizes, views=views, target_size=target_size)
     saved_img_paths = []
     for i, sub_lat in enumerate(sub_latents):
         img = image_from_latents(sub_lat.unsqueeze(0), clip_dynamic_range=True)
@@ -155,16 +156,21 @@ def main(config: Config):
             la_sampler,
             height=config.stage_1_args["height"],
             width=config.stage_1_args["width"],
+            base_img_size=config.stage_1_args["base_img_size"],
             generator=generator,
-            num_inference_steps=config.stage_1_args["num_inference_steps"])
+            num_inference_steps=config.stage_1_args["num_inference_steps"],
+            mcmc_iteration_cutoff=config.stage_1_args["mcmc_iteration_cutoff"])
 
     torch.save(latent_canvas_stage_1,
                config.stage_1_output_path / 'latent_canvas_stage_1_output.pt')
 
     sizes = config.context_list.collapse_sizes()
     views = config.context_list.collapse_views()
-    saved_img_paths = save_all_views_of_latent(latent_canvas_stage_1, sizes, views,
-                                               config.stage_1_output_path)
+    saved_img_paths = save_all_views_of_latent(latent_canvas_stage_1,
+                                               sizes,
+                                               views,
+                                               config.stage_1_output_path,
+                                               target_size=config.stage_1_args["base_img_size"])
     make_report(config, saved_img_paths, stage_num=1)
 
     stage_2 = IFSuperResolutionPipeline.from_pretrained(config.model_spec["stage_2"],
@@ -186,11 +192,17 @@ def main(config: Config):
             #  negative_prompt_embeds=negative_embeds,
             generator=generator,
             output_type="pt",
-            num_inference_steps=config.stage_2_args["num_inference_steps"])
+            num_inference_steps=config.stage_2_args["num_inference_steps"],
+            mcmc_iteration_cutoff=config.stage_2_args["mcmc_iteration_cutoff"],
+            base_img_size=config.stage_2_args["base_img_size"],
+            noise_level=config.stage_2_args["noise_level"])
 
     sizes = config.context_list.collapse_sizes(is_stage_2=True)
-    saved_img_paths = save_all_views_of_latent(latent_canvas_stage_2, sizes, views,
-                                               config.stage_2_output_path)
+    saved_img_paths = save_all_views_of_latent(latent_canvas_stage_2,
+                                               sizes,
+                                               views,
+                                               config.stage_2_output_path,
+                                               target_size=config.stage_2_args["base_img_size"])
     make_report(config, saved_img_paths, stage_num=2)
 
 

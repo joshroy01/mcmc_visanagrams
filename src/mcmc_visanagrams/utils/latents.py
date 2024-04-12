@@ -1,19 +1,23 @@
-from typing import List, Tuple, Optional
+from typing import TYPE_CHECKING, List, Tuple, Optional
 
 import torch
 from torch.nn.functional import interpolate
+
+if TYPE_CHECKING:
+    from mcmc_visanagrams.views.view_base import BaseView
 
 
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
 def extract_latents(latent_canvas: torch.Tensor,
                     sizes: List[Tuple[int, int, int]],
-                    views: Optional[List['BaseView']] = None) -> torch.Tensor:
+                    views: Optional[List['BaseView']] = None,
+                    target_size: int = 64) -> torch.Tensor:
     # Extract different latent chunks from a canvas
     latents = []
 
     for i, size in enumerate(sizes):
         sf, x_start, y_start = size
-        width = sf * 64
+        width = sf * target_size
         latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
 
         if views:
@@ -21,10 +25,10 @@ def extract_latents(latent_canvas: torch.Tensor,
         else:
             latent_viewed = latent
 
-        if latent_viewed.shape[-1] == 64:
+        if latent_viewed.shape[-1] == target_size:
             latent_viewed = latent_viewed
         else:
-            latent_viewed = interpolate(latent_viewed, (64, 64), mode='nearest')
+            latent_viewed = interpolate(latent_viewed, (target_size, target_size), mode='nearest')
 
         latents.append(latent_viewed)
 
@@ -34,6 +38,7 @@ def extract_latents(latent_canvas: torch.Tensor,
 
 def extract_latents_stage_2(latent_canvas: torch.Tensor,
                             sizes,
+                            views: Optional[List['BaseView']] = None,
                             target_size: int = 128) -> torch.Tensor:
     """Extracts latents from the composed canvas for stage 2
 
@@ -45,22 +50,23 @@ def extract_latents_stage_2(latent_canvas: torch.Tensor,
         raise ValueError("Latent canvas should have a width of 256")
     if latent_canvas.shape[-2] != 256:
         raise ValueError("Latent canvas should have a height of 256")
-    latents = []
-    for size in sizes:
-        sf, x_start, y_start = size
-        width = sf * target_size
-        latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
+    latents = extract_latents(latent_canvas, sizes, views, target_size=target_size)
+    # latents = []
+    # for size in sizes:
+    #     sf, x_start, y_start = size
+    #     width = sf * target_size
+    #     latent = latent_canvas[:, :, y_start:y_start + width, x_start:x_start + width]
 
-        if latent.shape[-1] == target_size:
-            latent = latent
-        else:
-            # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to
-            # use 'nearest-exact' instead.
-            latent = interpolate(latent, (target_size, target_size), mode='nearest-exact')
+    #     if latent.shape[-1] == target_size:
+    #         latent = latent
+    #     else:
+    #         # NOTE: According to PyTorch documentation, mode='nearest' is buggy. It is preferred to
+    #         # use 'nearest-exact' instead.
+    #         latent = interpolate(latent, (target_size, target_size), mode='nearest-exact')
 
-        latents.append(latent)
+    #     latents.append(latent)
 
-    latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
+    # latents = torch.cat(latents, dim=0).type(latent_canvas.dtype)
     return latents
 
 

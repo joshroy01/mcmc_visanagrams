@@ -704,31 +704,31 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
-    def __call__(
-        self,
-        context: 'ContextList',
-        sampler,
-        prompt: Union[str, List[str]] = None,
-        height: int = None,
-        width: int = None,
-        image: Union[PIL.Image.Image, np.ndarray, torch.FloatTensor] = None,
-        num_inference_steps: int = 50,
-        timesteps: List[int] = None,
-        guidance_scale: float = 4.0,
-        negative_prompt: Optional[Union[str, List[str]]] = None,
-        num_images_per_prompt: Optional[int] = 1,
-        eta: float = 0.0,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        prompt_embeds: Optional[torch.FloatTensor] = None,
-        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
-        output_type: Optional[str] = "pil",
-        return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
-        callback_steps: int = 1,
-        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-        noise_level: int = 250,
-        clean_caption: bool = True,
-    ):
+    def __call__(self,
+                 context: 'ContextList',
+                 sampler,
+                 prompt: Union[str, List[str]] = None,
+                 height: int = None,
+                 width: int = None,
+                 image: Union[PIL.Image.Image, np.ndarray, torch.FloatTensor] = None,
+                 num_inference_steps: int = 50,
+                 timesteps: List[int] = None,
+                 guidance_scale: float = 4.0,
+                 negative_prompt: Optional[Union[str, List[str]]] = None,
+                 num_images_per_prompt: Optional[int] = 1,
+                 eta: float = 0.0,
+                 generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+                 prompt_embeds: Optional[torch.FloatTensor] = None,
+                 negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+                 output_type: Optional[str] = "pil",
+                 return_dict: bool = True,
+                 callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+                 callback_steps: int = 1,
+                 cross_attention_kwargs: Optional[Dict[str, Any]] = None,
+                 noise_level: int = 250,
+                 clean_caption: bool = True,
+                 mcmc_iteration_cutoff: int = 50,
+                 base_img_size: int = 128):
         """
         Function invoked when calling the pipeline for generation.
 
@@ -919,7 +919,10 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # canvas_size is 256
         _, _, canvas_size, _ = latents_canvas.size()
         # intermediate_images is [num_contexts, num_channels, 128, 128] when only using 1 context.
-        intermediate_images = extract_latents_stage_2(latents_canvas, sizes)
+        intermediate_images = extract_latents_stage_2(latents_canvas,
+                                                      sizes,
+                                                      views=views,
+                                                      target_size=base_img_size)
         # ------------------------------------------------------------------------------------------
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
@@ -939,7 +942,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
         # Repeat the upscaled image to match the number of contexts provided (the batch dimension)
         # upscaled = upscaled.repeat(len(sizes), 1, 1, 1)
-        upscaled = extract_latents_stage_2(upscaled, sizes)
+        upscaled = extract_latents_stage_2(upscaled, sizes, views=views, target_size=base_img_size)
         print("Upscaled shape post-latent-extraction:", upscaled.shape)
 
         # This seems to suggest that the upscaled (and subsequently downscaled extracted latents) is
@@ -979,7 +982,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # Compute the gradient function for MCMC sampling
         def gradient_fn(x, t, text_embeddings):
             # Compute normal classifier-free guidance update
-            x = extract_latents_stage_2(x, sizes)
+            x = extract_latents_stage_2(x, sizes, views=views, target_size=base_img_size)
 
             # Dylan added this line for stage 2.
             x = torch.cat([x, upscaled], dim=1)
@@ -1017,12 +1020,16 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 noise_pred_uncond,
                 canvas_size,
                 sizes,
-                in_channels=self.unet.config.in_channels // 2)
+                in_channels=self.unet.config.in_channels // 2,
+                views=views,
+                target_size=base_img_size)
             noise_pred_text_canvas = make_canvas_stage_2(noise_pred_text,
                                                          canvas_size,
                                                          sizes,
                                                          in_channels=self.unet.config.in_channels //
-                                                         2)
+                                                         2,
+                                                         views=views,
+                                                         base_img_size=base_img_size)
             noise_pred = noise_pred_uncond_canvas + 7.5 * (noise_pred_text_canvas -
                                                            noise_pred_uncond_canvas)
             # Need to scale the gradients by coefficient to properly account for normalization in DSM loss + data contraction
@@ -1035,13 +1042,18 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
             x_canvas = make_canvas_stage_2(x,
                                            canvas_size,
                                            sizes,
-                                           in_channels=self.unet.config.in_channels)
-            x = extract_latents_stage_2(x_canvas, sizes)
+                                           in_channels=self.unet.config.in_channels,
+                                           views=views,
+                                           base_size=base_img_size)
+            x = extract_latents_stage_2(x_canvas, sizes, views=views, target_size=base_img_size)
             return x
 
         def noise_fn():
             noise_canvas = torch.randn_like(latents_canvas)
-            noise = extract_latents_stage_2(noise_canvas, sizes)
+            noise = extract_latents_stage_2(noise_canvas,
+                                            sizes,
+                                            views=views,
+                                            target_size=base_img_size)
             return noise
 
         sampler._gradient_function = gradient_fn
@@ -1113,18 +1125,36 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           return_dict=False)[0]
 
                 # Dylan copied this conditional from IFPipeline.
-                # if t > 50:
-                if True:
+                if t > mcmc_iteration_cutoff:
+                    print(f"\nDoing MCMC for iteration {t}!!!\n")
                     # if False:
                     # The score functions in the last 50 steps don't really change the image
                     intermediate_images_canvas = make_canvas_stage_2(
                         intermediate_images,
                         canvas_size,
                         sizes,
-                        in_channels=self.unet.config.in_channels // 2)
+                        in_channels=self.unet.config.in_channels // 2,
+                        views=views,
+                        base_size=base_img_size)
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
-                    intermediate_images = extract_latents_stage_2(intermediate_images, sizes)
+                    intermediate_images = extract_latents_stage_2(intermediate_images,
+                                                                  sizes,
+                                                                  views=views,
+                                                                  target_size=base_img_size)
+                else:
+                    print(f"\nSkipping MCMC for iteration {t}!!!\n")
+                    intermediate_images_canvas = make_canvas_stage_2(
+                        intermediate_images,
+                        canvas_size,
+                        sizes,
+                        in_channels=self.unet.config.in_channels // 2,
+                        views=views,
+                        base_size=base_img_size)
+                    intermediate_images = extract_latents_stage_2(intermediate_images_canvas,
+                                                                  sizes,
+                                                                  views=views,
+                                                                  target_size=base_img_size)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
@@ -1186,7 +1216,9 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         image = make_canvas_stage_2(image,
                                     canvas_size,
                                     sizes,
-                                    in_channels=self.unet.config.in_channels // 2)
+                                    in_channels=self.unet.config.in_channels // 2,
+                                    views=views,
+                                    base_size=base_img_size)
         return image
 
     def _extract_noise_from_prediction(self, model_output: torch.Tensor):

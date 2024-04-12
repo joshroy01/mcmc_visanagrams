@@ -2,18 +2,19 @@
 model_spec:
   stage_1: DeepFloyd/IF-I-XL-v1.0
   stage_2: DeepFloyd/IF-II-L-v1.0
-trial_name: "dog_flower_va_mcmc_sampling"
+trial_name: "dog_only_pure_va_rotated"
 context_list:
   -
-    size: [2, 0, 0]
+    size: [1, 0, 0]
     prompt: painting of a dog
     magnitude: 10.0
-    view: "identity"
-  -
-    size: [2, 0, 0]
-    prompt: painting of a flower
-    magnitude: 10.0
+    # view: "identity"
     view: "rotate_180"
+  # -
+  #   size: [1, 0, 0]
+  #   prompt: painting of a flower
+  #   magnitude: 10.0
+  #   view: "rotate_180"
 sampler:
   name: AnnealedULASampler
   kwargs:
@@ -24,16 +25,29 @@ seed: 0  # Can be None to use random seed.
 stage_1_args:
   # num_inference_steps: 100
   # num_inference_steps: 75
-  # num_inference_steps: 30
+  num_inference_steps: 30
   # num_inference_steps: 10
-  num_inference_steps: 2
-  height: 128
-  width: 128
+  # num_inference_steps: 2
+  mcmc_iteration_cutoff: 10000
+  # mcmc_iteration_cutoff: 50
+  # height: 128
+  height: 64
+  # width: 128
+  width: 64
+  base_img_size: 64
 stage_2_args:
   # num_inference_steps: 30
-  num_inference_steps: 2
+  # num_inference_steps: 2
+  num_inference_steps: 50
+  mcmc_iteration_cutoff: 10000
+  # mcmc_iteration_cutoff: 50
   height: 256
   width: 256
+  # base_img_size: 128
+  base_img_size: 256
+  noise_level: 250
+  # noise_level: 100
+  # noise_level: 500
 
 
 

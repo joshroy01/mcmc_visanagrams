@@ -54,10 +54,22 @@ def make_canvas(latents,
     return canvas_latent
 
 
-def make_canvas_stage_2(latents, canvas_size, sizes, in_channels=3):
+def make_canvas_stage_2(latents,
+                        canvas_size,
+                        sizes,
+                        in_channels=3,
+                        views: Optional[List['BaseView']] = None,
+                        do_edge_interpolation: bool = True,
+                        base_size: int = 128):
     """Wrapper for make_canvas that uses target_size=128"""
     # TODO: Add some error checking here to debug stage 2 issues?
-    return make_canvas(latents, canvas_size, sizes, in_channels=in_channels, base_size=128)
+    return make_canvas(latents,
+                       canvas_size,
+                       sizes,
+                       in_channels=in_channels,
+                       views=views,
+                       do_edge_interpolation=do_edge_interpolation,
+                       base_size=base_size)
 
 
 def save_model_spec(model_spec: Dict[str, str], dir_path: Path):

@@ -634,29 +634,29 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
-    def __call__(
-        self,
-        context: 'ContextList',
-        sampler,
-        prompt: Union[str, List[str]] = None,
-        num_inference_steps: int = 100,
-        timesteps: List[int] = None,
-        guidance_scale: float = 7.0,
-        negative_prompt: Optional[Union[str, List[str]]] = None,
-        num_images_per_prompt: Optional[int] = 1,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-        eta: float = 0.0,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        prompt_embeds: Optional[torch.FloatTensor] = None,
-        negative_prompt_embeds: Optional[torch.FloatTensor] = None,
-        output_type: Optional[str] = "pil",
-        return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
-        callback_steps: int = 1,
-        clean_caption: bool = True,
-        cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    def __call__(self,
+                 context: 'ContextList',
+                 sampler,
+                 prompt: Union[str, List[str]] = None,
+                 num_inference_steps: int = 100,
+                 timesteps: List[int] = None,
+                 guidance_scale: float = 7.0,
+                 negative_prompt: Optional[Union[str, List[str]]] = None,
+                 num_images_per_prompt: Optional[int] = 1,
+                 height: Optional[int] = None,
+                 width: Optional[int] = None,
+                 eta: float = 0.0,
+                 generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+                 prompt_embeds: Optional[torch.FloatTensor] = None,
+                 negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+                 output_type: Optional[str] = "pil",
+                 return_dict: bool = True,
+                 callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+                 callback_steps: int = 1,
+                 clean_caption: bool = True,
+                 cross_attention_kwargs: Optional[Dict[str, Any]] = None,
+                 mcmc_iteration_cutoff: int = 50,
+                 base_img_size: int = 64):
         """
         Function invoked when calling the pipeline for generation.
 
@@ -796,7 +796,10 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         )
 
         _, _, canvas_size, _ = latents_canvas.size()
-        intermediate_images = extract_latents(latents_canvas, sizes, views)
+        intermediate_images = extract_latents(latents_canvas,
+                                              sizes,
+                                              views,
+                                              target_size=base_img_size)
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -813,7 +816,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         # Compute the gradient function for MCMC sampling
         def gradient_fn(x, t, text_embeddings):
             # Compute normal classifier-free guidance update
-            x = extract_latents(x, sizes, views)
+            x = extract_latents(x, sizes, views, target_size=base_img_size)
             model_input = (torch.cat([x] * 2) if do_classifier_free_guidance else x)
             model_input = self.scheduler.scale_model_input(model_input, t)
             # predict the noise residual
@@ -835,12 +838,15 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                    canvas_size,
                                                    sizes,
                                                    in_channels=self.unet.config.in_channels,
-                                                   views=views)
+                                                   views=views,
+                                                   base_size=base_img_size)
             noise_pred_text_canvas = make_canvas(noise_pred_text,
                                                  canvas_size,
                                                  sizes,
                                                  in_channels=self.unet.config.in_channels,
-                                                 views=views)
+                                                 views=views,
+                                                 base_size=base_img_size)
+            print("Warning!! Should this value be guidance_scale or weights instead of hard-coded?")
             noise_pred = noise_pred_uncond_canvas + 7.5 * (noise_pred_text_canvas -
                                                            noise_pred_uncond_canvas)
             # Need to scale the gradients by coefficient to properly account for normalization in DSM loss + data contraction
@@ -854,12 +860,12 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                    sizes,
                                    in_channels=self.unet.config.in_channels,
                                    views=views)
-            x = extract_latents(x_canvas, sizes, views)
+            x = extract_latents(x_canvas, sizes, views, target_size=base_img_size)
             return x
 
         def noise_fn():
             noise_canvas = torch.randn_like(latents_canvas)
-            noise = extract_latents(noise_canvas, sizes, views)
+            noise = extract_latents(noise_canvas, sizes, views, target_size=base_img_size)
             return noise
 
         sampler._gradient_function = gradient_fn
@@ -913,7 +919,8 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           **extra_step_kwargs,
                                                           return_dict=False)[0]
 
-                if t > 50:
+                if t > mcmc_iteration_cutoff:
+                    print(f"\nDoing MCMC for iteration {t}!!!\n")
                     # The score functions in the last 50 steps don't really change the image
                     #call reverse transform for each canvas
                     intermediate_images_canvas = make_canvas(
@@ -921,10 +928,14 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                         canvas_size,
                         sizes,
                         in_channels=self.unet.config.in_channels,
-                        views=views)
+                        views=views,
+                        base_size=base_img_size)
                     intermediate_images = sampler.sample_step(intermediate_images_canvas, t,
                                                               prompt_embeds)
-                    intermediate_images = extract_latents(intermediate_images, sizes, views)
+                    intermediate_images = extract_latents(intermediate_images,
+                                                          sizes,
+                                                          views,
+                                                          target_size=base_img_size)
 
                 else:
                     # With the addition of the views, we still need to make the canvas and extract
@@ -934,8 +945,12 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                         canvas_size,
                         sizes,
                         in_channels=self.unet.config.in_channels,
-                        views=views)
-                    intermediate_images = extract_latents(intermediate_images_canvas, sizes, views)
+                        views=views,
+                        base_size=base_img_size)
+                    intermediate_images = extract_latents(intermediate_images_canvas,
+                                                          sizes,
+                                                          views,
+                                                          target_size=base_img_size)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and
@@ -952,5 +967,6 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                             canvas_size,
                             sizes,
                             in_channels=self.unet.config.in_channels,
-                            views=views)
+                            views=views,
+                            base_size=base_img_size)
         return image

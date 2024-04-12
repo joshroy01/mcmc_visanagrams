@@ -7,6 +7,20 @@ if TYPE_CHECKING:
     from mcmc_visanagrams.views.view_base import BaseView
 
 
+def apply_views_to_latents(latents: torch.Tensor,
+                           views: List['BaseView'],
+                           inverse: bool = False) -> torch.Tensor:
+    lats_tformed = []
+    for i, view in enumerate(views):
+        lat = latents[i]
+        if inverse:
+            lat = view.inverse_view(lat)
+        else:
+            lat = view.view(lat)
+        lats_tformed.append(lat)
+    return torch.stack(lats_tformed, dim=0).type(latents.dtype)
+
+
 # Code for take individual latents grids and making them into a 2D canvas from a set of conditioned text instructions
 def extract_latents(latent_canvas: torch.Tensor,
                     sizes: List[Tuple[int, int, int]],

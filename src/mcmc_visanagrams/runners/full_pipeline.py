@@ -175,6 +175,10 @@ def main(config: Config):
                                                target_size=config.stage_1_args["base_img_size"])
     make_report(config, saved_img_paths, stage_num=1)
 
+    if config.model_spec["stage_2"] is None:
+        print("Skipping stage 2 as model spec is not provided.")
+        return
+
     stage_2 = IFSuperResolutionPipeline.from_pretrained(config.model_spec["stage_2"],
                                                         text_encoder=None,
                                                         variant="fp16",

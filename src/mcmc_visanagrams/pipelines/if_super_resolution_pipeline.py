@@ -728,7 +728,9 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                  noise_level: int = 250,
                  clean_caption: bool = True,
                  mcmc_iteration_cutoff: int = 50,
-                 base_img_size: int = 128):
+                 base_img_size: int = 128,
+                 using_va_method: bool = False,
+                 using_mcmc_sampling: bool = False):
         """
         Function invoked when calling the pipeline for generation.
 
@@ -1110,18 +1112,16 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                     return_dict=False,
                 )[0]
 
-                USING_VA_METHOD = True
-
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred = self._classifier_free_guidance(noise_pred, weights, model_input,
-                                                                views, USING_VA_METHOD)
+                                                                views, using_va_method)
                     print("Noise pred shape after classifer free guidance:", noise_pred.shape)
 
                 if self.scheduler.config.variance_type not in ["learned", "learned_range"]:
                     noise_pred, _ = noise_pred.split(intermediate_images.shape[1], dim=1)
 
-                if USING_VA_METHOD:
+                if using_va_method:
                     noise_pred = self._adjust_noise_pred_va_method(noise_pred, views)
                     intermediate_images = make_canvas_stage_2(intermediate_images,
                                                               canvas_size,
@@ -1143,15 +1143,14 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           **extra_step_kwargs,
                                                           return_dict=False)[0]
 
-                if USING_VA_METHOD:
-                    # intermediate_images = apply_views_to_latents(intermediate_images, views)
+                if using_va_method:
                     intermediate_images = extract_latents_stage_2(intermediate_images,
                                                                   sizes,
                                                                   views,
                                                                   target_size=base_img_size)
 
                 # Dylan copied this conditional from IFPipeline.
-                if t > mcmc_iteration_cutoff:
+                if using_mcmc_sampling and t > mcmc_iteration_cutoff:
                     print(f"\nDoing MCMC for iteration {t}!!!\n")
                     # if False:
                     # The score functions in the last 50 steps don't really change the image

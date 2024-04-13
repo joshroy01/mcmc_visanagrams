@@ -2,17 +2,19 @@
 model_spec:
   stage_1: DeepFloyd/IF-I-XL-v1.0
   stage_2: DeepFloyd/IF-II-L-v1.0
-trial_name: "dog_flower_va_no_mcmc_sampling_trial_2"
+trial_name: "testing_canvas/penguin_giraffe"
 context_list:
   -
     size: [1, 0, 0]
-    prompt: painting of a dog
+    # prompt: painting of a dog
+    prompt: drawing of a penguin
     magnitude: 10.0
     view: "identity"
     # view: "rotate_180"
   -
     size: [1, 0, 0]
-    prompt: painting of a flower
+    # prompt: painting of a flower
+    prompt: drawing of a giraffe
     magnitude: 10.0
     view: "rotate_180"
 sampler:
@@ -28,19 +30,21 @@ stage_1_args:
   num_inference_steps: 30
   # num_inference_steps: 10
   # num_inference_steps: 2
-  mcmc_iteration_cutoff: 10000
-  # mcmc_iteration_cutoff: 50
+  # mcmc_iteration_cutoff: 10000
+  mcmc_iteration_cutoff: 50
   # height: 128
   height: 64
   # width: 128
   width: 64
   base_img_size: 64
+  using_va_method: True
+  using_mcmc_sampling: False
 stage_2_args:
   # num_inference_steps: 30
   # num_inference_steps: 2
   num_inference_steps: 50
-  mcmc_iteration_cutoff: 10000
-  # mcmc_iteration_cutoff: 50
+  # mcmc_iteration_cutoff: 10000
+  mcmc_iteration_cutoff: 50
   height: 256
   width: 256
   # base_img_size: 128
@@ -48,6 +52,8 @@ stage_2_args:
   noise_level: 250
   # noise_level: 100
   # noise_level: 500
+  using_va_method: True
+  using_mcmc_sampling: False
 
 
 

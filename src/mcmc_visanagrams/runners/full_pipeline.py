@@ -48,7 +48,7 @@ class Config:
         self.stage_2_args = config["stage_2_args"]
 
         # Make the trial output path and save the config file in it.
-        self.trial_output_path.mkdir(exist_ok=True)
+        self.trial_output_path.mkdir(parents=True, exist_ok=True)
         self.stage_1_output_path.mkdir(exist_ok=True)
         self.stage_2_output_path.mkdir(exist_ok=True)
         with (self.trial_output_path / "config.yaml").open("w") as f:
@@ -159,7 +159,9 @@ def main(config: Config):
             base_img_size=config.stage_1_args["base_img_size"],
             generator=generator,
             num_inference_steps=config.stage_1_args["num_inference_steps"],
-            mcmc_iteration_cutoff=config.stage_1_args["mcmc_iteration_cutoff"])
+            mcmc_iteration_cutoff=config.stage_1_args["mcmc_iteration_cutoff"],
+            using_va_method=config.stage_1_args["using_va_method"],
+            using_mcmc_sampling=config.stage_1_args["using_mcmc_sampling"])
 
     torch.save(latent_canvas_stage_1,
                config.stage_1_output_path / 'latent_canvas_stage_1_output.pt')
@@ -195,7 +197,9 @@ def main(config: Config):
             num_inference_steps=config.stage_2_args["num_inference_steps"],
             mcmc_iteration_cutoff=config.stage_2_args["mcmc_iteration_cutoff"],
             base_img_size=config.stage_2_args["base_img_size"],
-            noise_level=config.stage_2_args["noise_level"])
+            noise_level=config.stage_2_args["noise_level"],
+            using_va_method=config.stage_2_args["using_va_method"],
+            using_mcmc_sampling=config.stage_2_args["using_mcmc_sampling"])
 
     sizes = config.context_list.collapse_sizes(is_stage_2=True)
     saved_img_paths = save_all_views_of_latent(latent_canvas_stage_2,

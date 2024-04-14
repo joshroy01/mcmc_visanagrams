@@ -999,10 +999,11 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
         NOTE: I have verified (in test_noise_extraction.py) that both methods of noise extraction
         work the same way. I don't know why it was changed.
         """
+        channels = model_input.shape[1]
         noise_pred_uncond, noise_pred_text = model_output.chunk(2)
 
-        noise_pred_uncond, _ = noise_pred_uncond.split(model_input.shape[1], dim=1)
-        noise_pred_text, predicted_variance = noise_pred_text.split(model_input.shape[1], dim=1)
+        noise_pred_uncond, _ = noise_pred_uncond.split(channels, dim=1)
+        noise_pred_text, predicted_variance = noise_pred_text.split(channels, dim=1)
 
         return (noise_pred_text, predicted_variance, noise_pred_uncond)
 

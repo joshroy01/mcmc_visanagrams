@@ -15,7 +15,7 @@ def make_canvas(latents,
                 in_channels=3,
                 base_size=64,
                 views: Optional[List['BaseView']] = None,
-                do_edge_interpolation: bool = True):
+                do_edge_interpolation: bool = False):
     # Make a canvas from different latents
     canvas_count = torch.zeros(canvas_size, canvas_size).to(latents.device)
     canvas_latent = torch.zeros(1, in_channels, canvas_size, canvas_size,

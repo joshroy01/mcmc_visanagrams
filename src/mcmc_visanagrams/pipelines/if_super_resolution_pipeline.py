@@ -815,7 +815,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         sizes, prompt, weights, views = context.collapse(is_stage_2=True)
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
-        print("Sizes:", sizes)
+        # print("Sizes:", sizes)
         # ------------------------------------------------------------------------------------------
 
         # 1. Check inputs. Raise error if not correct
@@ -1106,8 +1106,8 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # in the denoising loop, otherwise the gradient function would be messed up if we
                 # did it per-function call). I feel like this might be the reason we get some visual
                 # artifacts in the output images.
-                print("Intermediate images shape:", intermediate_images.shape)
-                print("Upscaled shape:", upscaled.shape)
+                # print("Intermediate images shape:", intermediate_images.shape)
+                # print("Upscaled shape:", upscaled.shape)
                 # This is failing due to intermediate images being [128, 128] and upscaled being
                 # [256, 256]
                 # NOTE: I'm going to try out commenting this out. If this doesn't work, I may need
@@ -1126,10 +1126,10 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # prompt_embeds = prompt_embeds.repeat(2, 1, 1)
                 # This didn't work.
 
-                print("Model input shape:", model_input.shape)
-                print("Prompt embedding shape:", prompt_embeds.shape)
-                print("Cross attention kwargs:", cross_attention_kwargs)
-                print("Class labels:", noise_level)
+                # print("Model input shape:", model_input.shape)
+                # print("Prompt embedding shape:", prompt_embeds.shape)
+                # print("Cross attention kwargs:", cross_attention_kwargs)
+                # print("Class labels:", noise_level)
 
                 # predict the noise residual
                 noise_pred: torch.Tensor = self.unet(
@@ -1144,7 +1144,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred = self._classifier_free_guidance(noise_pred, weights, model_input)
-                    print("Noise pred shape after classifer free guidance:", noise_pred.shape)
+                    # print("Noise pred shape after classifer free guidance:", noise_pred.shape)
 
                 if self.scheduler.config.variance_type not in ["learned", "learned_range"]:
                     noise_pred, _ = noise_pred.split(intermediate_images.shape[1], dim=1)
@@ -1157,12 +1157,12 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                               views=views,
                                                               base_size=base_img_size)
 
-                    print("Adjusted shapes")
-                    print("\tnoise_pred:", noise_pred.shape)
-                    print("\tintermediate_images:", intermediate_images.shape)
+                #     print("Adjusted shapes")
+                #     print("\tnoise_pred:", noise_pred.shape)
+                #     print("\tintermediate_images:", intermediate_images.shape)
 
-                print("Noise prediction shape input to scheduler:", noise_pred.shape)
-                print("intermediate_images shape input to scheduler:", intermediate_images.shape)
+                # print("Noise prediction shape input to scheduler:", noise_pred.shape)
+                # print("intermediate_images shape input to scheduler:", intermediate_images.shape)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 intermediate_images = self.scheduler.step(noise_pred,
@@ -1179,7 +1179,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
                 # Dylan copied this conditional from IFPipeline.
                 if using_mcmc_sampling and t > mcmc_iteration_cutoff:
-                    print(f"\nDoing MCMC for iteration {t}!!!\n")
+                    # print(f"\nDoing MCMC for iteration {t}!!!\n")
                     # if False:
                     # The score functions in the last 50 steps don't really change the image
                     intermediate_images_canvas = make_canvas_stage_2(
@@ -1224,7 +1224,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                 intermediate_images = intermediate_images.type(prompt_embeds.dtype)
                 #-----------------------------------------------------------------------------------
 
-                print()
+                # print()
 
         image = intermediate_images
         image = make_canvas_stage_2(image,
@@ -1255,7 +1255,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
 
     def _classifier_free_guidance(self, noise_pred: torch.Tensor, weights: torch.Tensor,
                                   model_input: torch.Tensor) -> torch.Tensor:
-        print("Noise prediction output from UNET shape:", noise_pred.shape)
+        # print("Noise prediction output from UNET shape:", noise_pred.shape)
 
         (noise_pred_text, predicted_variance,
          noise_pred_uncond) = self._extract_noise_from_prediction(noise_pred, model_input)
@@ -1273,7 +1273,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                      reduction: str = 'mean'):
         if reduction != 'mean':
             raise ValueError("Only 'mean' reduction is supported for now.")
-        print("Noise pred shape before adjustment:", noise_pred.shape)
+        # print("Noise pred shape before adjustment:", noise_pred.shape)
 
         # As make_canvas averages the input across the batch (zeroth) dimension, this is the same
         # operation as the VA mean method.
@@ -1284,6 +1284,6 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                                          base_size=256,
                                          views=views)
 
-        print("Noise pred shape after adjustment:", noise_pred.shape)
+        # print("Noise pred shape after adjustment:", noise_pred.shape)
 
         return noise_pred

@@ -887,9 +887,9 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
 
                 # model_input shape is [num_contexts * 2, 3, 64, 64] (assuming classifer-free
                 # guidance).
-                print("Model input shape:", model_input.shape)
-                print("Prompt embedding shape:", prompt_embeds.shape)
-                print("Cross attention kwargs:", cross_attention_kwargs)
+                # print("Model input shape:", model_input.shape)
+                # print("Prompt embedding shape:", prompt_embeds.shape)
+                # print("Cross attention kwargs:", cross_attention_kwargs)
 
                 # predict the noise residual
                 noise_pred = self.unet(
@@ -903,10 +903,10 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                 # perform guidance
                 if do_classifier_free_guidance:
                     noise_pred = self._classifier_free_guidance(noise_pred, weights, model_input)
-                    print("Noise pred shape after classifer free guidance:", noise_pred.shape)
+                    # print("Noise pred shape after classifer free guidance:", noise_pred.shape)
 
                 if self.scheduler.config.variance_type not in ["learned", "learned_range"]:
-                    print("Splitting noise pred, removing predicted variance")
+                    # print("Splitting noise pred, removing predicted variance")
                     noise_pred, _ = noise_pred.split(model_input.shape[1], dim=1)
 
                 if using_va_method:
@@ -917,12 +917,12 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                       views=views,
                                                       base_size=base_img_size)
 
-                    print("Adjusted shapes")
-                    print("\tnoise_pred:", noise_pred.shape)
-                    print("\tintermediate_images:", intermediate_images.shape)
+                #     print("Adjusted shapes")
+                #     print("\tnoise_pred:", noise_pred.shape)
+                #     print("\tintermediate_images:", intermediate_images.shape)
 
-                print("Noise prediction shape input to scheduler:", noise_pred.shape)
-                print("intermediate_images shape input to scheduler:", intermediate_images.shape)
+                # print("Noise prediction shape input to scheduler:", noise_pred.shape)
+                # print("intermediate_images shape input to scheduler:", intermediate_images.shape)
 
                 # compute the previous noisy sample x_t -> x_t-1
                 intermediate_images = self.scheduler.step(noise_pred,
@@ -938,7 +938,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                                           target_size=base_img_size)
 
                 if using_mcmc_sampling and t > mcmc_iteration_cutoff:
-                    print(f"\nDoing MCMC for iteration {t}!!!\n")
+                    # print(f"\nDoing MCMC for iteration {t}!!!\n")
                     # The score functions in the last 50 steps don't really change the image
                     intermediate_images_canvas = make_canvas(
                         intermediate_images,
@@ -1009,7 +1009,7 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
 
     def _classifier_free_guidance(self, noise_pred: torch.Tensor, weights: torch.Tensor,
                                   model_input: torch.Tensor) -> torch.Tensor:
-        print("Noise prediction output from UNET shape:", noise_pred.shape)
+        # print("Noise prediction output from UNET shape:", noise_pred.shape)
 
         (noise_pred_text, predicted_variance,
          noise_pred_uncond) = self._extract_noise_from_prediction(noise_pred, model_input)
@@ -1027,12 +1027,12 @@ class IFPipeline(DiffusionPipeline, LoraLoaderMixin):
                                      reduction: str = 'mean'):
         if reduction != 'mean':
             raise ValueError("Only 'mean' reduction is supported for now.")
-        print("Noise pred shape before adjustment:", noise_pred.shape)
+        # print("Noise pred shape before adjustment:", noise_pred.shape)
 
         # As make_canvas averages the input across the batch (zeroth) dimension, this is the same
         # operation as the VA mean method.
         noise_pred = make_canvas(noise_pred, 64, sizes, in_channels=6, base_size=64, views=views)
 
-        print("Noise pred shape after adjustment:", noise_pred.shape)
+        # print("Noise pred shape after adjustment:", noise_pred.shape)
 
         return noise_pred

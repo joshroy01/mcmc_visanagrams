@@ -6,22 +6,34 @@ model_spec:
 # trial_name: "testing_canvas/penguin_giraffe_make_canvas_test_mcmc_lower_cutoff/no_edge_interpolation"
 # trial_name: testing_canvas/penguin_giraffe_make_canvas_test/trial_2
 # trial_name: testing_canvas/dog_flower_mcmc_only_stage_2/mag_7_5/noise_level_100
-trial_name: testing_canvas/dog_flower_mcmc_both_stages/mag_10/fixed_upscaling/0_seed
+# trial_name: testing_canvas/dog_flower_mcmc_both_stages/mag_10/fixed_upscaling/0_seed
+# trial_name: sumaiya_output/dog_flower/va_reproduction
+# trial_name: sumaiya_output/dog_flower/mcmc
+# trial_name: sumaiya_output/kitchen_panda/va_reproduction
+trial_name: sumaiya_output/kitchen_panda/mcmc
+# trial_name: sumaiya_output/fish_duck/va_reproduction
+# trial_name: sumaiya_output/fish_duck/mcmc
 context_list:
   -
     size: [1, 0, 0]
-    prompt: painting of a dog
+    # prompt: painting of a dog
+    prompt: a painting of kitchenware
+    # prompt: a lithograph of a fish
     # prompt: drawing of a penguin
-    magnitude: 10.0
+    magnitude: 7.5
+    # magnitude: 10.0
     # magnitude: 12.5
     # magnitude: 15.0
     view: "identity"
     # view: "rotate_180"
   -
     size: [1, 0, 0]
-    prompt: painting of a flower
+    # prompt: painting of a flower
+    prompt: a painting of a red panda
+    # prompt: a lithograph of a duck
     # prompt: drawing of a giraffe
-    magnitude: 10.0
+    magnitude: 7.5
+    # magnitude: 10.0
     # magnitude: 12.5
     # magnitude: 15.0
     view: "rotate_180"

@@ -78,8 +78,12 @@ def save_all_views_of_latent(latent_canvas: torch.Tensor, sizes, views, output_p
         view_name = type(views[i]).__name__
         ax.set_title(view_name)
 
-        img_path = output_path / f"sub_latent_{i}.png"
+        img_path = output_path / f"output_{i}_{view_name}.png"
         fig.savefig(img_path)
+
+        img_np_path = output_path / f"output_{i}_{view_name}.npy"
+        np.save(img_np_path, img)
+
         saved_img_paths.append(img_path)
     return saved_img_paths
 
@@ -89,7 +93,7 @@ def main(config: Config):
     from mcmc_visanagrams.utils.display import visualize_context
 
     # guidance_mag = 20.0
-    guidance_mag = 10.0
+    # guidance_mag = 10.0
 
     # Specify the locations of textual descriptions to compose
     # The keys have the form (scale, x, y) where scale is the size of the canvas and x, y is the starting locations
@@ -204,6 +208,9 @@ def main(config: Config):
             noise_level=config.stage_2_args["noise_level"],
             using_va_method=config.stage_2_args["using_va_method"],
             using_mcmc_sampling=config.stage_2_args["using_mcmc_sampling"])
+
+    torch.save(latent_canvas_stage_2,
+               config.stage_2_output_path / 'latent_canvas_stage_2_output.pt')
 
     sizes = config.context_list.collapse_sizes(is_stage_2=True)
     saved_img_paths = save_all_views_of_latent(latent_canvas_stage_2,

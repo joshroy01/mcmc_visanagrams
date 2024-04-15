@@ -1,0 +1,97 @@
+jobs: [
+  # Kitchen/panda jobs.
+  {
+    trial_name: sumaiya_output/kitchen_panda/va_reproduction,
+    context_list: [
+      {prompt: a painting of kitchenware},
+      {prompt: a painting of a red panda}
+    ],
+    stage_1_args: {using_mcmc_sampling: False},
+    stage_2_args: {using_mcmc_sampling: False}
+  },
+  {
+    trial_name: sumaiya_output/kitchen_panda/mcmc,
+    context_list: [
+      {prompt: a painting of kitchenware},
+      {prompt: a painting of a red panda}
+    ],
+    stage_1_args: {using_mcmc_sampling: True},
+    stage_2_args: {using_mcmc_sampling: True}
+  },
+  # Dog/flower jobs.
+  {
+    trial_name: sumaiya_output/dog_flower/va_reproduction,
+    context_list: [
+      {prompt: a painting of a dog},
+      {prompt: a painting of a flower}
+    ],
+    stage_1_args: {using_mcmc_sampling: False},
+    stage_2_args: {using_mcmc_sampling: False}
+  },
+  {
+    trial_name: sumaiya_output/dog_flower/mcmc,
+    context_list: [
+      {prompt: a painting of a dog},
+      {prompt: a painting of a flower}
+    ],
+    stage_1_args: {using_mcmc_sampling: True},
+    stage_2_args: {using_mcmc_sampling: True}
+  },
+  # Fish/duck jobs.
+  {
+    trial_name: sumaiya_output/fish_duck/va_reproduction,
+    context_list: [
+      {prompt: a lithograph of a fish},
+      {prompt: a lithograph of a duck}
+    ],
+    stage_1_args: {using_mcmc_sampling: False},
+    stage_2_args: {using_mcmc_sampling: False}
+  },
+  {
+    trial_name: sumaiya_output/fish_duck/mcmc,
+    context_list: [
+      {prompt: a lithograph of a fish},
+      {prompt: a lithograph of a duck}
+    ],
+    stage_1_args: {using_mcmc_sampling: True},
+    stage_2_args: {using_mcmc_sampling: True}
+  },
+  # Penguin/giraffe jobs.
+  {
+    trial_name: sumaiya_output/penguin_giraffe/va_reproduction,
+    context_list: [
+      {prompt: a drawing of a giraffe},
+      {prompt: a drawing of a penguin}
+    ],
+    stage_1_args: {using_mcmc_sampling: False},
+    stage_2_args: {using_mcmc_sampling: False}
+  },
+  {
+    trial_name: sumaiya_output/penguin_giraffe/mcmc,
+    context_list: [
+      {prompt: a drawing of a giraffe},
+      {prompt: a drawing of a penguin}
+    ],
+    stage_1_args: {using_mcmc_sampling: True},
+    stage_2_args: {using_mcmc_sampling: True}
+  },
+  # Young/old woman
+  {
+    trial_name: sumaiya_output/young_old_woman/va_reproduction,
+    context_list: [
+      {prompt: a photo of a young lady},
+      {prompt: a photo of an old woman}
+    ],
+    stage_1_args: {using_mcmc_sampling: False},
+    stage_2_args: {using_mcmc_sampling: False}
+  },
+  {
+    trial_name: sumaiya_output/young_old_woman/mcmc,
+    context_list: [
+      {prompt: a photo of a young lady},
+      {prompt: a photo of an old woman}
+    ],
+    stage_1_args: {using_mcmc_sampling: True},
+    stage_2_args: {using_mcmc_sampling: True}
+  },
+]

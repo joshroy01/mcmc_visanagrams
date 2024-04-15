@@ -11,59 +11,14 @@ import yaml
 from mcmc_visanagrams.pipelines.if_pipeline import IFPipeline
 from mcmc_visanagrams.pipelines.if_super_resolution_pipeline import IFSuperResolutionPipeline
 from mcmc_visanagrams.utils.output import save_model_spec, save_context
-from mcmc_visanagrams.context import ContextList, Context
 from mcmc_visanagrams.utils.display import image_from_latents
 from mcmc_visanagrams.utils.latents import extract_latents
 from mcmc_visanagrams.utils.report import make_report
+from mcmc_visanagrams.runners.config import Config
 
 # Code for Samplers
 from mcmc_visanagrams.samplers.annealed_ula_sampler import AnnealedULASampler
 from mcmc_visanagrams.samplers.annealed_uha_sampler import AnnealedUHASampler
-
-# from huggingface_hub import notebook_login
-
-# notebook_login()
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-OUTPUT_ROOT_PATH = REPO_ROOT / "output"
-OUTPUT_ROOT_PATH.mkdir(exist_ok=True)
-
-
-class Config:
-
-    def __init__(self, config_path: Path):
-        with config_path.open("r") as f:
-            config = yaml.safe_load(f)
-        self._config_dict = config
-
-        self.model_spec = config["model_spec"]
-        self.trial_name: str = config["trial_name"]
-        self.trial_output_path: Path = OUTPUT_ROOT_PATH / self.trial_name
-        self.stage_1_output_path: Path = self.trial_output_path / "stage_1"
-        self.stage_2_output_path: Path = self.trial_output_path / "stage_2"
-        self.context_list = self._context_list_from_config(config)
-        self.sampler = config["sampler"]
-        self.seed = config.get("seed", None)
-        self.stage_1_args = config["stage_1_args"]
-        self.stage_2_args = config["stage_2_args"]
-
-        # Make the trial output path and save the config file in it.
-        self.trial_output_path.mkdir(parents=True, exist_ok=True)
-        self.stage_1_output_path.mkdir(exist_ok=True)
-        self.stage_2_output_path.mkdir(exist_ok=True)
-        with (self.trial_output_path / "config.yaml").open("w") as f:
-            yaml.safe_dump(config, f)
-
-    def _context_list_from_config(self, config):
-        context_list = ContextList()
-        for context in config["context_list"]:
-            size = tuple(context.pop("size"))
-            context_list.append(Context(size=size, **context))
-        return context_list
-
-    # def initialize_sampler(self):
-    #     if self.sampler["name"] == "AnnealedULASampler":
-    #         return AnnealedULASampler(self.sampler["num_steps"], self.sampler["num_samplers_per_steps"])
 
 
 def save_all_views_of_latent(latent_canvas: torch.Tensor, sizes, views, output_path: Path,
@@ -88,7 +43,7 @@ def save_all_views_of_latent(latent_canvas: torch.Tensor, sizes, views, output_p
     return saved_img_paths
 
 
-def main(config: Config):
+def run_full_pipeline(config: Config):
 
     from mcmc_visanagrams.utils.display import visualize_context
 
@@ -230,4 +185,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = Config(args.config_path)
-    main(config)
+    run_full_pipeline(config)

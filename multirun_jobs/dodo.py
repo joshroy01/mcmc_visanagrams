@@ -53,6 +53,13 @@ def generate_and_save_config_paths():
             f.write(f"{path}\n")
 
 
+# TODO: I should really make the generation of the master list a task that depends on the base
+# configuration template and the variadic configuration(s). Then, creation of each config file
+# should be a task. That way, the config file can be a dependency of the task that runs the
+# pipeline.
+# - This is likely the most "doit" way of organizing this.
+
+
 def task_multirun():
     generate_and_save_config_paths()
 
@@ -63,9 +70,6 @@ def task_multirun():
     for i, config_path in enumerate(all_config_paths):
         config = Config(config_path)
         target = config.stage_2_output_path / "report.pdf"
-        # TODO: I should really make the generation of the master list the only thing that happens
-        # every time. Then, creation of each config file should be a task. That way, the config file
-        # can be a dependency of the task that runs the pipeline.
 
         # TODO: If I want to get fancy, I could define sub-tasks for both stage 1 and stage 2 of the
         # pipeline with each target being the respective report.pdf.

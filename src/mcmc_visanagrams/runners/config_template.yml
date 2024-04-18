@@ -1,0 +1,85 @@
+# Don't specify stage 2 if you don't want to run it.
+model_spec:
+  stage_1: DeepFloyd/IF-I-XL-v1.0
+  stage_2: DeepFloyd/IF-II-L-v1.0
+  # stage_2: Null
+# trial_name: "testing_canvas/penguin_giraffe_make_canvas_test_mcmc_lower_cutoff/no_edge_interpolation"
+# trial_name: testing_canvas/penguin_giraffe_make_canvas_test/trial_2
+# trial_name: testing_canvas/dog_flower_mcmc_only_stage_2/mag_7_5/noise_level_100
+# trial_name: testing_canvas/dog_flower_mcmc_both_stages/mag_10/fixed_upscaling/0_seed
+# trial_name: sumaiya_output/dog_flower/va_reproduction
+# trial_name: sumaiya_output/dog_flower/mcmc
+# trial_name: sumaiya_output/kitchen_panda/va_reproduction
+trial_name: sumaiya_output/kitchen_panda/mcmc
+# trial_name: sumaiya_output/fish_duck/va_reproduction
+# trial_name: sumaiya_output/fish_duck/mcmc
+context_list:
+  -
+    size: [1, 0, 0]
+    # prompt: painting of a dog
+    prompt: a painting of kitchenware
+    # prompt: a lithograph of a fish
+    # prompt: drawing of a penguin
+    magnitude: 7.5
+    # magnitude: 10.0
+    # magnitude: 12.5
+    # magnitude: 15.0
+    view: "identity"
+    # view: "rotate_180"
+  -
+    size: [1, 0, 0]
+    # prompt: painting of a flower
+    prompt: a painting of a red panda
+    # prompt: a lithograph of a duck
+    # prompt: drawing of a giraffe
+    magnitude: 7.5
+    # magnitude: 10.0
+    # magnitude: 12.5
+    # magnitude: 15.0
+    view: "rotate_180"
+sampler:
+  name: AnnealedULASampler
+  kwargs:
+    num_steps: 1000
+    # num_samples_per_step: 10
+    num_samples_per_step: 20
+seed: 0  # Can be None to use random seed.
+stage_1_args:
+  # num_inference_steps: 100
+  # num_inference_steps: 75
+  num_inference_steps: 30
+  # num_inference_steps: 10
+  # num_inference_steps: 2
+  # mcmc_iteration_cutoff: 10000
+  mcmc_iteration_cutoff: 0
+  # mcmc_iteration_cutoff: 50
+  # mcmc_iteration_cutoff: 150
+  # height: 128
+  height: 64
+  # width: 128
+  width: 64
+  base_img_size: 64
+  using_va_method: True
+  # using_mcmc_sampling: False
+  using_mcmc_sampling: True
+stage_2_args:
+  # num_inference_steps: 30
+  # num_inference_steps: 2
+  num_inference_steps: 50
+  # mcmc_iteration_cutoff: 10000
+  mcmc_iteration_cutoff: 0
+  # mcmc_iteration_cutoff: 50
+  # mcmc_iteration_cutoff: 150
+  height: 256
+  width: 256
+  # base_img_size: 128
+  base_img_size: 256
+  noise_level: 250
+  # noise_level: 100
+  # noise_level: 500
+  using_va_method: True
+  # using_mcmc_sampling: False
+  using_mcmc_sampling: True
+
+
+

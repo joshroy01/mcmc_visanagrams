@@ -1,0 +1,10 @@
+{
+    "(2, 0, 0)": {
+        "string": "An epic space battle",
+        "magnitude": 20.0
+    },
+    "(1, 0, 64)": {
+        "string": "The starship Enterprise",
+        "magnitude": 20.0
+    }
+}

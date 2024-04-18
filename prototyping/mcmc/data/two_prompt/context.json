@@ -1,0 +1,10 @@
+{
+    "(2, 0, 0)": {
+        "string": "An oil painting of the swiss alps",
+        "magnitude": 20.0
+    },
+    "(1, 0, 0)": {
+        "string": "A quaint cottage in the style of an oil painting",
+        "magnitude": 20.0
+    }
+}

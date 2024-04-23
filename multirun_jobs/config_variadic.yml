@@ -264,13 +264,13 @@ jobs: [
         view: "flip"
       }
     ],
-    stage_1_args: {using_mcmc_sampling: False},
-    stage_2_args: {using_mcmc_sampling: False}
-  }
+    stage_1_args: {using_mcmc_sampling: True},
+    stage_2_args: {using_mcmc_sampling: True}
+  },
 
   ##################################################################################################
   # Correlated Noise Experiments
-  # - This requires some packages I don't have installed
+  # - This requires some views that had some cryptic dependency issues
   ##################################################################################################
   # {
   #   trial_name: sumaiya_output/corr_noise/
@@ -278,7 +278,7 @@ jobs: [
 
   ##################################################################################################
   # Noise Shift Experiments
-  # - This requires some packages I don't have installed
+  # - This requires some views that had some cryptic dependency issues
   ##################################################################################################
   # {
   #   trial_name: sumaiya_output/noise_shift/

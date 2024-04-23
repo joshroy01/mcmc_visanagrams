@@ -1,99 +1,120 @@
+from pathlib import Path
+
+FILE_DIR = Path(__file__).resolve().parent
+REPO_DIR = FILE_DIR.parent
+
 import torch
 import clip
 from PIL import Image
+import yaml
+import numpy as np
+
 
 def get_clip_score(image, text, rotation):
     # Load the pre-trained CLIP model
     model, preprocess = clip.load('ViT-B/32')
-    
+
     # Define rotation angles
     rotation_map = {"identical": 0, "flip": 180}
-    
+
     # Get the rotation angle
     rotation_angle = rotation_map.get(rotation.lower())
     if rotation_angle is None:
         raise ValueError("Rotation must be 'identical' or 'flip'")
-    
+
     # Rotate the image if necessary
     if rotation_angle != 0:
         image = image.rotate(rotation_angle)
-    
+
     # Preprocess the image and tokenize the text
     image_input = preprocess(image).unsqueeze(0)
     text_input = clip.tokenize([text])
-    
+
     # Move the inputs to GPU if available
     device = "cuda" if torch.cuda.is_available() else "cpu"
     image_input = image_input.to(device)
     text_input = text_input.to(device)
     model = model.to(device)
-    
+
     # Generate embeddings for the image and text
     with torch.no_grad():
         image_features = model.encode_image(image_input)
         text_features = model.encode_text(text_input)
-    
+
     # Normalize the features
     image_features = image_features / image_features.norm(dim=-1, keepdim=True)
     text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-    
+
     # Calculate the cosine similarity to get the CLIP score
     clip_score = torch.matmul(image_features, text_features.T).item()
-    
+
     return clip_score
 
 
-root_dir = 'C:\\Users\\ferdawsi\\Documents\\EECS_542\\va_reproduction\\'
-root_prompt = "a painting of "
+def main():
+    root_path = REPO_DIR / "output" / "multirun_test" / "sumaiya_output"
+    prompt_shortnames = [
+        "dog_flower", "fish_duck", "penguin_giraffe", "kitchen_panda", "young_old_woman"
+    ]
 
-text_prompts = [["a duck", "a fish"], ["a penguin", "a giraffe"], ["a flower", "a dog"], ["an old woman","a young lady"], ["a red panda", "kitchenware"]] 
-index = 0
+    methods = ["mcmc", "va_reproduction", "va_unconditional", "mcmc_unconditional"]
+    results = dict()
+    for prompt_shortname in prompt_shortnames:
+        prompt_root = root_path / prompt_shortname
+        results[prompt_shortname] = dict()
+        for method in methods:
 
-image_paths = ["duck_2.png", "fish_2.png", "penguin_2.png", "giraffe_2.png", "flower_2.png", "dog_2.png", "old_2.png", "young_2.png", "panda_2.png", "kitchen_2.png"]
-for k, dir in enumerate(image_paths):
-    image_path = root_dir + dir
-    image = Image.open(image_path)
+            method_root = prompt_root / method
+            results[prompt_shortname][method] = torch.zeros((2, 2))
 
-    # Define texts and rotations
+            for seed_dir in method_root.glob("seed_*"):
+                seed = seed_dir.name.split("_")[1]
 
-    texts = text_prompts[index]
-    texts = [root_prompt + item for item in texts]
+                # Read the config file to determine the actual prompts.
+                config_path = seed_dir / "config.yaml"
+                with config_path.open("r") as f:
+                    config = yaml.safe_load(f)
+                # Create a map between index and associated prompt.
+                prompt_view_map = [[c["prompt"], c["view"]] for c in config["context_list"]]
+                for i in range(len(prompt_view_map)):
+                    view_str = prompt_view_map[i][1]
+                    # results[prompt_shortname][method][view_str] = 0
+                    if view_str == "identity":
+                        prompt_view_map[i][1] = "identical"
+                    elif prompt_view_map[i][1] == "rotate_180":
+                        prompt_view_map[i][1] = "flip"
 
-    rotations = ["identical", "flip"]
+                # Create a 2x2 tensor to store scores
+                scores_tensor = torch.zeros((2, 2))
 
-    # Create a 2x2 tensor to store scores
-    scores_tensor = torch.zeros((2, 2))
+                stage_2_output_path = seed_dir / "stage_2"
 
-    # Iterate over rotations
-    for i, rotation in enumerate(rotations):
-        # Iterate over texts
-        for j, text in enumerate(texts):
-            # Calculate CLIP score
-            score = get_clip_score(image, text, rotation)
-            scores_tensor[i, j] = score
+                views = [p[1] for p in prompt_view_map]
+                texts = [p[0] for p in prompt_view_map]
 
-    # Save the scores tensor as a .pth file
-    output_filename = root_dir + "stage_2\\" + str(k) + "_scores.pth"
-    torch.save(scores_tensor, output_filename)
-    if (k % 2 != 0):
-        index = index + 1 
+                # Lazily construct the image matrix
+                img_mat = [[None, None], [None, None]]
+                path_00 = stage_2_output_path / f"output_0_IdentityView.npy"
+                img_mat[0][0] = Image.fromarray(np.load(path_00))
+                img_mat[1][0] = Image.fromarray(np.load(path_00))
+                path_11 = stage_2_output_path / f"output_1_Rotate180View.npy"
+                img_mat[0][1] = Image.fromarray(np.load(path_11))
+                img_mat[1][1] = Image.fromarray(np.load(path_11))
+
+                for i, rotation in enumerate(views):
+                    for j, text in enumerate(texts):
+                        score = get_clip_score(img_mat[i][j], text, rotation)
+                        print(
+                            f"Seed: {seed}, Method: {method}, Prompt: {text}, Score: {score}, view: {rotation}"
+                        )
+
+                        scores_tensor[i, j] = score
+                results[prompt_shortname][method] += scores_tensor / 3.  # average over num seeds.
+
+            # Save the scores tensor as a .pth file
+            output_filename = method_root / "clip_scores.pth"
+            torch.save(results[prompt_shortname][method], output_filename)
 
 
-
-# root_dir = 'C:\\Users\\ferdawsi\\Documents\\EECS_542\\va_reproduction\\'
-# root_prompt = "a painting of "
-
-# image_paths = ["duck_2.png", "fish_2.png", "penguin_2.png", "giraffe_2.png", "flower_2.png", "dog_2.png", "old_2.png", "young_2.png", "panda_2.png", "kitchen_2.png"]
-# text_prompts = ["a duck", "a fish", "a penguin", "a giraffe", "a flower", "a dog", "an old woman","a young lady", "a red panda", "kitchenware"] 
-
-# # Concatenate root_dir to image_paths
-# image_paths = [root_dir + item for item in image_paths]
-
-# # Concatenate root_prompt to text_prompts
-# text_prompts = [root_prompt + item for item in text_prompts]
-
-# # Get the CLIP scores tensor
-# clip_scores_tensor = get_clip_scores(image_paths, text_prompts)
-
-# # Save the scores tensor to .pth file
-# save_scores(clip_scores_tensor, "stage1_scores.pth")
+if __name__ == "__main__":
+    main()

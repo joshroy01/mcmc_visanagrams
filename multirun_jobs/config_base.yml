@@ -1,0 +1,44 @@
+# This is the base configuration file for the multirun experiment. Anything with "CONFIG_VAR" should
+# have multiple specifications in the config_variadic.yml file.
+model_spec:
+  stage_1: DeepFloyd/IF-I-XL-v1.0
+  stage_2: DeepFloyd/IF-II-L-v1.0
+trial_name: multirun_test
+context_list:
+  -
+    size: [1, 0, 0]
+    prompt: CONFIG_VAR
+    magnitude: 7.5
+    view: "identity"
+  -
+    size: [1, 0, 0]
+    prompt: CONFIG_VAR
+    magnitude: 7.5
+    view: "rotate_180"
+sampler:
+  name: AnnealedULASampler
+  kwargs:
+    num_steps: 1000
+    num_samples_per_step: 20
+seed: 0
+stage_1_args:
+  num_inference_steps: 30
+  mcmc_iteration_cutoff: 0
+  height: 64
+  width: 64
+  base_img_size: 64
+  using_va_method: True
+  using_mcmc_sampling: CONFIG_VAR
+stage_2_args:
+  num_inference_steps: 50
+  mcmc_iteration_cutoff: 0
+  height: 256
+  width: 256
+  base_img_size: 256
+  noise_level: 250
+  using_va_method: True
+  using_mcmc_sampling: CONFIG_VAR
+  unconditional: False
+
+
+

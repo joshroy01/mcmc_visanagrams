@@ -730,7 +730,8 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
                  mcmc_iteration_cutoff: int = 50,
                  base_img_size: int = 128,
                  using_va_method: bool = False,
-                 using_mcmc_sampling: bool = False):
+                 using_mcmc_sampling: bool = False,
+                 unconditional: bool = False):
         """
         Function invoked when calling the pipeline for generation.
 
@@ -813,6 +814,10 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         # for the MCMC sampling.
         # ------------------------------------------------------------------------------------------
         sizes, prompt, weights, views = context.collapse(is_stage_2=True)
+
+        if unconditional:
+            prompt = [None for _ in prompt]
+
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]
         # print("Sizes:", sizes)

@@ -816,7 +816,7 @@ class IFSuperResolutionPipeline(DiffusionPipeline, LoraLoaderMixin):
         sizes, prompt, weights, views = context.collapse(is_stage_2=True)
 
         if unconditional:
-            prompt = [None for _ in prompt]
+            prompt = ["" for _ in prompt]
 
         device = self._execution_device
         weights = torch.Tensor(weights).to(device)[:, None, None, None]

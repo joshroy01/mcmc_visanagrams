@@ -68,17 +68,20 @@ def task_multirun():
     all_config_paths = [Path(p.strip()) for p in master_list]
 
     for i, config_path in enumerate(all_config_paths):
-        config = Config(config_path)
-        target = config.stage_2_output_path / "report.pdf"
+        config_root = Config(config_path)
+        for j, seed in enumerate([0, 90210, 8675309]):
+            config = config_root.new_config_from_seed(seed)
 
-        # TODO: If I want to get fancy, I could define sub-tasks for both stage 1 and stage 2 of the
-        # pipeline with each target being the respective report.pdf.
-        yield {
-            'basename': f"multirun_job_{i}",
-            'doc': f"Run the full pipeline for config {config_path}",
-            'actions': [(run_full_pipeline, [config])],
-            # Can't add config_path to the file_dep because it will trigger the task every time it's
-            # run. Instead, we add the master list file as a dependency and check the target report.
-            'file_dep': [MASTER_LIST_PATH],
-            'targets': [target]
-        }
+            target = config.stage_2_output_path / "report.pdf"
+
+            # TODO: If I want to get fancy, I could define sub-tasks for both stage 1 and stage 2 of the
+            # pipeline with each target being the respective report.pdf.
+            yield {
+                'basename': f"multirun_job_{i}_seed{seed}",
+                'doc': f"Run the full pipeline for config {config_path} and seed {config.seed}",
+                'actions': [(run_full_pipeline, [config])],
+                # Can't add config_path to the file_dep because it will trigger the task every time it's
+                # run. Instead, we add the master list file as a dependency and check the target report.
+                'file_dep': [MASTER_LIST_PATH],
+                'targets': [target]
+            }

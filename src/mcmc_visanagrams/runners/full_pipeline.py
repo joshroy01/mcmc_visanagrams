@@ -162,7 +162,8 @@ def run_full_pipeline(config: Config):
             base_img_size=config.stage_2_args["base_img_size"],
             noise_level=config.stage_2_args["noise_level"],
             using_va_method=config.stage_2_args["using_va_method"],
-            using_mcmc_sampling=config.stage_2_args["using_mcmc_sampling"])
+            using_mcmc_sampling=config.stage_2_args["using_mcmc_sampling"],
+            unconditional=config.stage_2_args.get("unconditional", False))
 
     torch.save(latent_canvas_stage_2,
                config.stage_2_output_path / 'latent_canvas_stage_2_output.pt')

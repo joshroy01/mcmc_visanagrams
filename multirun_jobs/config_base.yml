@@ -38,6 +38,7 @@ stage_2_args:
   noise_level: 250
   using_va_method: True
   using_mcmc_sampling: CONFIG_VAR
+  unconditional: False
 
 
 

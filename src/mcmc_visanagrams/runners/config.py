@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import yaml
+from copy import deepcopy
 
 from mcmc_visanagrams.context import ContextList, Context
 
@@ -27,12 +28,29 @@ class Config:
         self.stage_1_args = config["stage_1_args"]
         self.stage_2_args = config["stage_2_args"]
 
+    def new_config_from_seed(self, seed: int):
+        config = deepcopy(self)
+
+        config.seed = seed
+        config._config_dict["seed"] = seed
+        config.trial_output_path /= f"seed_{seed}"
+        config.trial_output_path.mkdir(parents=True, exist_ok=True)
+        config.seed = seed
+        config.stage_1_output_path = config.trial_output_path / "stage_1"
+        config.stage_2_output_path = config.trial_output_path / "stage_2"
+        config.stage_1_output_path.mkdir(exist_ok=True)
+        config.stage_2_output_path.mkdir(exist_ok=True)
+        config.mkdirs()
+
+        return config
+
+    def mkdirs(self):
         # Make the trial output path and save the config file in it.
         self.trial_output_path.mkdir(parents=True, exist_ok=True)
         self.stage_1_output_path.mkdir(exist_ok=True)
         self.stage_2_output_path.mkdir(exist_ok=True)
         with (self.trial_output_path / "config.yaml").open("w") as f:
-            yaml.safe_dump(config, f)
+            yaml.safe_dump(self._config_dict, f)
 
     @staticmethod
     def from_dict(config_dict):
@@ -45,7 +63,8 @@ class Config:
 
     def _context_list_from_config(self, config):
         context_list = ContextList()
-        for context in config["context_list"]:
+        context_orig = deepcopy(config["context_list"])
+        for context in context_orig:
             size = tuple(context.pop("size"))
             context_list.append(Context(size=size, **context))
         return context_list

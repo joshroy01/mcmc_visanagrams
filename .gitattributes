@@ -1,0 +1,6 @@
+# Ignore all jupyter notebooks for GitHub language stats purposes.
+# This isn't meant to be deceptive, I believe that inclusion of Jupyter notebooks skews the 
+# statistics due to disproportionately large file size and isn't representative of effort or 
+# repository design.
+*.ipynb linguist-vendored
+
